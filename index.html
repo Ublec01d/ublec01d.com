@@ -53,9 +53,9 @@
     <button onclick="clearBlobs()">Wipe out Blobs</button>
     <button onclick="togglePortalGun()" id="portalToggle">Portal Gun: Off</button>
     <button onclick="clearPortals()">Clear Portals</button>
-    <button onclick="toggleDeathTouch()" id="deathToggle">Death Touch: Off</button>
     <button onclick="rotateSelectedPortal('left')">⟲ Rotate Left</button>
     <button onclick="rotateSelectedPortal('right')">⟳ Rotate Right</button>
+    <button onclick="toggleDeathTouch()" id="deathToggle">Death Touch: Off</button>
 
 
     <p>Click a portal, then press Q/E to rotate</p>
@@ -206,6 +206,13 @@
       portalA = null;
       portalB = null;
     }
+    function rotateSelectedPortal(direction) {
+  if (!selectedPortal) return;
+
+  const angle = (direction === 'left' ? -1 : 1) * Math.PI / 18;
+  Body.rotate(selectedPortal, angle);
+}
+
 
 
     Events.on(engine, 'collisionStart', event => {
@@ -372,6 +379,22 @@
         context.stroke();
       });
       context.restore();
+
+      // Step 0.66: glow effect for selected portal
+        if (selectedPortal) {
+          context.save();
+          context.beginPath();
+          context.translate(selectedPortal.position.x, selectedPortal.position.y);
+          context.rotate(selectedPortal.angle);
+          context.rect(-10, -40, 20, 80);
+          context.shadowColor = 'white';
+          context.shadowBlur = 20;
+          context.lineWidth = 3;
+          context.strokeStyle = 'white';
+          context.stroke();
+          context.restore();
+        }
+        
 
       // Step 0.7: touch support for mobile
       canvas.addEventListener('touchstart', (e) => {
