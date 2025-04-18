@@ -1,8 +1,9 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Blobverse: The Micro Multiverse</title>
   <style>
     html, body {
@@ -53,6 +54,8 @@
     <button onclick="togglePortalGun()" id="portalToggle">Portal Gun: Off</button>
     <button onclick="clearPortals()">Clear Portals</button>
     <button onclick="toggleDeathTouch()" id="deathToggle">Death Touch: Off</button>
+    <button onclick="rotateSelectedPortal('left')">⟲ Rotate Left</button>
+    <button onclick="rotateSelectedPortal('right')">⟳ Rotate Right</button>
 
 
     <p>Click a portal, then press Q/E to rotate</p>
@@ -375,18 +378,19 @@
         const touch = e.touches[0];
         mouse.position.x = touch.clientX;
         mouse.position.y = touch.clientY;
-      });
+      }, { passive: false });
 
       canvas.addEventListener('touchmove', (e) => {
         const touch = e.touches[0];
         mouse.position.x = touch.clientX;
         mouse.position.y = touch.clientY;
-      });
+      }, { passive: false });
 
       canvas.addEventListener('touchend', () => {
         mouse.position.x = -1000;
         mouse.position.y = -1000;
       });
+
 
       // Step 1: determine who is scared by motion, crushed, and track overexertion
       blobs.forEach(blob => {
@@ -559,23 +563,58 @@ if (blob.position.y > canvas.height - 100 && stackPressure >= 3) {
       });
 
       const clickedBlobs = Query.point(blobs, mousePos);
-clickedBlobs.forEach(blob => {
-  if (deathTouchActive) {
-    if (!blob.personality?.dead) {
-      blob.personality.trauma = 2000; // insta-kill
-      blob.render.fillStyle = '#ff2222'; // flash red for style
-    }
-  } else {
-    if (!blob.personality?.dead) {
-      Body.applyForce(blob, blob.position, { x: 0, y: -0.05 });
-      blob.render.fillStyle = 'white';
-    }
-  }
-});
-
-
+        clickedBlobs.forEach(blob => {
+          if (deathTouchActive) {
+            if (!blob.personality?.dead) {
+              blob.personality.trauma = 2000; // insta-kill
+              blob.render.fillStyle = '#ff2222'; // flash red for style
+            }
+          } else {
+            if (!blob.personality?.dead) {
+              Body.applyForce(blob, blob.position, { x: 0, y: -0.05 });
+              blob.render.fillStyle = 'white';
+            }
+          }
+        });
       });
     
+      canvas.addEventListener('touchstart', function(e) {
+  const touch = e.touches[0];
+  const mousePos = { x: touch.clientX, y: touch.clientY };
+
+  if (portalGunActive) {
+    if (!portalA) {
+      placePortal(mousePos.x, mousePos.y, true);
+    } else {
+      placePortal(mousePos.x, mousePos.y, false);
+    }
+    return;
+  }
+
+  selectedPortal = null;
+  [portalA, portalB].forEach(portal => {
+    if (portal && Matter.Bounds.contains(portal.bounds, mousePos)) {
+      selectedPortal = portal;
+    }
+  });
+
+  const clickedBlobs = Query.point(blobs, mousePos);
+  clickedBlobs.forEach(blob => {
+    if (deathTouchActive) {
+      if (!blob.personality?.dead) {
+        blob.personality.trauma = 2000;
+        blob.render.fillStyle = '#ff2222';
+      }
+    } else {
+      if (!blob.personality?.dead) {
+        Body.applyForce(blob, blob.position, { x: 0, y: -0.05 });
+        blob.render.fillStyle = 'white';
+      }
+    }
+  });
+
+  e.preventDefault(); // stop double-tap zoom and scrolling
+}, { passive: false });
 
     window.addEventListener('keydown', (e) => {
       if (!selectedPortal) return;
