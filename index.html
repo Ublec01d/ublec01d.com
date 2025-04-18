@@ -9,7 +9,7 @@
       margin: 0;
       padding: 0;
       overflow: hidden;
-      background: #0f0f1b;
+      background: black;
       color: white;
       font-family: 'Segoe UI', sans-serif;
     }
@@ -24,15 +24,36 @@
       padding: 10px;
       border-radius: 10px;
     }
+    #ui button {
+    background-color: transparent;
+    border: none;
+    color: grey;
+    font-family: "Courier New", Courier, monospace;
+    font-size: 1.2em;
+    font-weight: bold;
+    padding: 5px 10px;
+    margin: 5px 0;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+    }
+    
+    #ui button:hover {
+        background-color: lime;
+        color: black;
+        border-radius: 4px;
+    }
+
   </style>
 </head>
 <body>
   <canvas id="world"></canvas>
   <div id="ui">
     <button onclick="spawnBlob()">Spawn Blob</button>
-    <button onclick="clearBlobs()">Clear Blobs</button>
+    <button onclick="clearBlobs()">Wipe out Blobs</button>
     <button onclick="togglePortalGun()">Portal Gun: Off</button>
     <button onclick="clearPortals()">Clear Portals</button>
+    <button onclick="toggleDeathTouch()">Death Touch: Off</button>
+
 
     <p>Click a portal, then press Q/E to rotate</p>
   </div>
@@ -54,7 +75,7 @@
       engine: engine,
       options: {
         wireframes: false,
-        background: '#0f0f1b',
+        background: '#000000',
         width: canvas.width,
         height: canvas.height,
       }
@@ -74,6 +95,13 @@
     let inPortal = new WeakSet();
     let selectedPortal = null;
     let portalGunActive = false;
+    let deathTouchActive = false;
+
+    function toggleDeathTouch() {
+      deathTouchActive = !deathTouchActive;
+      document.querySelector('#ui button:nth-child(5)').textContent = `Death Touch: ${deathTouchActive ? 'On' : 'Off'}`;
+    }
+
 
     function getRandomColor() {
       const hue = Math.floor(Math.random() * 360);
@@ -81,7 +109,7 @@
     }
 
     function spawnBlob() {
-      const radius = 30 + Math.random() * 20;
+      const radius = 10 + Math.random() * 20;
       const blob = Bodies.circle(
         Math.random() * canvas.width,
         canvas.height - 100,
@@ -110,9 +138,33 @@
     }
 
     function clearBlobs() {
-      blobs.forEach(blob => Composite.remove(world, blob));
-      blobs.length = 0;
-    }
+  if (blobs.length === 0) return;
+
+  const center = { x: canvas.width / 2, y: canvas.height / 2 };
+
+  // Step 1: find blob closest to center
+  const centralBlob = blobs.reduce((a, b) =>
+    Vector.magnitude(Vector.sub(a.position, center)) <
+    Vector.magnitude(Vector.sub(b.position, center))
+      ? a
+      : b
+  );
+
+  // Step 2: sort blobs by distance to central blob
+  const sortedBlobs = [...blobs].sort((a, b) => {
+    const dA = Vector.magnitude(Vector.sub(a.position, centralBlob.position));
+    const dB = Vector.magnitude(Vector.sub(b.position, centralBlob.position));
+    return dA - dB;
+  });
+
+  // Step 3: "kill" each one with a delay
+  sortedBlobs.forEach((blob, i) => {
+    setTimeout(() => {
+      blob.personality.trauma = 2000; // instakill trauma
+    }, i * 100); // 100ms delay between each death
+  });
+}
+
 
     function placePortal(x, y, isBlue) {
       const portal = Bodies.rectangle(x, y, 20, 80, {
@@ -153,6 +205,11 @@
         const blob = labels.includes('blob') ? (pair.bodyA.label === 'blob' ? pair.bodyA : pair.bodyB) : null;
         const other = blob === pair.bodyA ? pair.bodyB : pair.bodyA;
 
+        if (blob && other.label !== 'ghost') {
+          blob.personality.touching ||= new Set();
+          blob.personality.touching.add(other.id);
+        }
+
         if (blob && (other === portalA || other === portalB) && !inPortal.has(blob)) {
           const target = (other === portalA) ? portalB : portalA;
           if (target) {
@@ -167,6 +224,19 @@
         }
       });
     });
+
+    Events.on(engine, 'collisionEnd', event => {
+      event.pairs.forEach(pair => {
+        const labels = [pair.bodyA.label, pair.bodyB.label];
+        const blob = labels.includes('blob') ? (pair.bodyA.label === 'blob' ? pair.bodyA : pair.bodyB) : null;
+        const other = blob === pair.bodyA ? pair.bodyB : pair.bodyA;
+      
+        if (blob && blob.personality?.touching) {
+          blob.personality.touching.delete(other.id);
+        }
+      });
+    });
+
 
     const mouse = Mouse.create(canvas);
     const mouseConstraint = MouseConstraint.create(engine, {
@@ -191,7 +261,7 @@
         const personality = blob.personality;
         if (!personality || personality.dead) continue;
 
-        if (!personality.ageOffset) personality.ageOffset = Math.floor(Math.random() * 600); // ~10s difference
+        if (!personality.ageOffset) personality.ageOffset = Math.floor(Math.random() * 1200); // ~10s difference
         personality.age = (personality.age || 0) + 1;
         const growthInterval = 120;
 
@@ -264,8 +334,8 @@
         }
 
         if (personality.scared) {
-          const jitterX = (Math.random() - 0.5) * 0.004;
-          const jitterY = (Math.random() - 0.5) * 0.004;
+          const jitterX = (Math.random() - 0.5) * 0.02;
+          const jitterY = (Math.random() - 0.5) * 0.001;
           Body.applyForce(blob, blob.position, { x: jitterX, y: jitterY });
         }
       });
@@ -431,10 +501,11 @@ if (blob.position.y > canvas.height - 100 && stackPressure >= 3) {
         const dist = Vector.magnitude(toMouse);
         const dir = Vector.normalise(toMouse);
 
-        const grounded = Math.abs(blob.velocity.y) < 0.5;
+        const isTouching = blob.personality.touching?.size > 0;
+
 
         // Random idle bunny hop
-        if (grounded && Math.random() < 0.02) {
+        if (isTouching && Math.random() < 0.02) {
           Body.applyForce(blob, position, {
             x: (Math.random() - 0.5) * 0.01,
             y: -0.035
@@ -442,8 +513,8 @@ if (blob.position.y > canvas.height - 100 && stackPressure >= 3) {
         }
 
         // Mouse-directed bunny hop
-        if (grounded && dist < 400 && Math.random() < 0.25) {
-          const jump = personality.scared ? -0.035 : -0.045;
+        if (isTouching && dist < 400 && Math.random() < 0.55) {
+          const jump = personality.scared ? -0.025 : -0.055;
           const speed = personality.scared ? -0.03 : 0.02;
           Body.applyForce(blob, position, {
             x: dir.x * speed,
@@ -474,13 +545,23 @@ if (blob.position.y > canvas.height - 100 && stackPressure >= 3) {
       });
 
       const clickedBlobs = Query.point(blobs, mousePos);
-      clickedBlobs.forEach(blob => {
-        Body.applyForce(blob, blob.position, { x: 0, y: -0.05 });
-        blob.render.fillStyle = 'white';
-        // no override — natural color will update next frame
+clickedBlobs.forEach(blob => {
+  if (deathTouchActive) {
+    if (!blob.personality?.dead) {
+      blob.personality.trauma = 2000; // insta-kill
+      blob.render.fillStyle = '#ff2222'; // flash red for style
+    }
+  } else {
+    if (!blob.personality?.dead) {
+      Body.applyForce(blob, blob.position, { x: 0, y: -0.05 });
+      blob.render.fillStyle = 'white';
+    }
+  }
+});
+
 
       });
-    });
+    
 
     window.addEventListener('keydown', (e) => {
       if (!selectedPortal) return;
