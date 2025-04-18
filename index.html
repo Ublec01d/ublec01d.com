@@ -296,12 +296,17 @@
         if (blob.circleRadius >= 60 && personality.age > 7200 + personality.ageOffset) {
           const pos = blob.position;
           const numChildren = Math.random() < 0.4 ? 1 : 2;
+          const parentRadius = blob.circleRadius;
 
           for (let j = 0; j < numChildren; j++) {
+            const maxChildRadius = parentRadius * 0.3;
+            const minChildRadius = 8;
+            const newRadius = Math.max(minChildRadius, Math.min(maxChildRadius, parentRadius * 0.4 * (0.8 + Math.random() * 0.4)));
+          
             const baby = Bodies.circle(
               pos.x + (Math.random() - 0.5) * 20,
               pos.y - 10,
-              20,
+              newRadius,
               {
                 restitution: 0.9,
                 frictionAir: 0.02,
@@ -309,17 +314,23 @@
                 render: { fillStyle: '#44cc44' }
               }
             );
+            
+            baby.circleRadius = newRadius;
+            
             baby.personality = {
               curious: true,
               scared: false,
               agitation: 0,
-              trauma: 0,
+              trauma: blob.personality.trauma * 0.25,
               dead: false,
               age: 0
             };
+          
             Composite.add(world, baby);
             blobs.push(baby);
           }
+
+
 
           Composite.remove(world, blob);
           blobs.splice(i, 1);
@@ -519,9 +530,11 @@ if (blob.position.y > canvas.height - 100 && stackPressure >= 3) {
         blobs.forEach(other => {
           if (other === blob || !other.personality || other.personality.dead) return;
           const d = Vector.magnitude(Vector.sub(blob.position, other.position));
-          if (d < 100) {
-            other.personality.agitation = Math.max(other.personality.agitation, 50);
+          if (d < 120) {
+            other.personality.agitation = Math.max(other.personality.agitation, 80);
+            other.personality.scared = true;
           }
+
         });
       });
 
@@ -546,24 +559,57 @@ if (blob.position.y > canvas.height - 100 && stackPressure >= 3) {
         }
 
         // Mouse-directed bunny hop
+        blob.personality.isChasing = false;
+
         if (isTouching && dist < 400 && Math.random() < 0.25) {
           const baseJump = -0.045;
           const baseSpeed = 0.02;
-                
-          // When scared: jump higher and push away from the mouse
+        
           const jump = personality.scared ? baseJump * 1.2 : baseJump;
           const speed = personality.scared ? baseSpeed * 2.5 : baseSpeed;
-                
-          // Direction away from the mouse
           const fleeDir = personality.scared ? Vector.neg(dir) : dir;
-                
+        
           Body.applyForce(blob, position, {
             x: fleeDir.x * speed,
             y: jump
           });
+        
+          if (!personality.scared) {
+            personality.isChasing = true;
+          }
         }
+
       });
     });
+
+    // Step 3.5: spread curiosity
+      blobs.forEach(blob => {
+        if (!blob.personality || blob.personality.dead || blob.personality.scared) return;
+      
+        const isTouching = blob.personality.touching?.size > 0;
+        if (!isTouching) return;
+      
+        // Find nearby blobs that are chasing the mouse
+        const nearbyChasers = blobs.filter(other =>
+          other !== blob &&
+          other.personality &&
+          other.personality.isChasing &&
+          !other.personality.dead &&
+          Vector.magnitude(Vector.sub(blob.position, other.position)) < 120
+        );
+      
+        if (nearbyChasers.length > 0 && Math.random() < 0.1) {
+          const toMouse = Vector.sub(mouse.position, blob.position);
+          const dir = Vector.normalise(toMouse);
+        
+          Body.applyForce(blob, blob.position, {
+            x: dir.x * 0.02,
+            y: -0.045
+          });
+        
+          blob.personality.isChasing = true;
+        }
+      });
 
 
     canvas.addEventListener('mousedown', function(e) {
