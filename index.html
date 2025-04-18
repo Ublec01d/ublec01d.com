@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Blobverse: The Micro Multiverse</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #0f0f1b;
+      color: white;
+      font-family: 'Segoe UI', sans-serif;
+    }
+    canvas {
+      display: block;
+    }
+    #ui {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.5);
+      padding: 10px;
+      border-radius: 10px;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="world"></canvas>
+  <div id="ui">
+    <button onclick="spawnBlob()">Spawn Blob</button>
+    <button onclick="clearBlobs()">Clear Blobs</button>
+    <button onclick="togglePortalGun()">Portal Gun: Off</button>
+    <button onclick="clearPortals()">Clear Portals</button>
+
+    <p>Click a portal, then press Q/E to rotate</p>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/matter-js@0.19.0/build/matter.min.js"></script>
+  <script>
+    const { Engine, Render, Runner, Bodies, Composite, Body, Events, Mouse, MouseConstraint, Query, Vector } = Matter;
+
+    const engine = Engine.create();
+    const world = engine.world;
+    world.gravity.y = 1;
+
+    const canvas = document.getElementById('world');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const render = Render.create({
+      canvas: canvas,
+      engine: engine,
+      options: {
+        wireframes: false,
+        background: '#0f0f1b',
+        width: canvas.width,
+        height: canvas.height,
+      }
+    });
+    Render.run(render);
+    const runner = Runner.create();
+    Runner.run(runner, engine);
+
+    const ground = Bodies.rectangle(canvas.width / 2, canvas.height + 25, canvas.width, 50, { isStatic: true });
+    const leftWall = Bodies.rectangle(-25, canvas.height / 2, 50, canvas.height, { isStatic: true });
+    const rightWall = Bodies.rectangle(canvas.width + 25, canvas.height / 2, 50, canvas.height, { isStatic: true });
+    Composite.add(world, [ground, leftWall, rightWall]);
+
+    const blobs = [];
+    let portalA = null;
+    let portalB = null;
+    let inPortal = new WeakSet();
+    let selectedPortal = null;
+    let portalGunActive = false;
+
+    function getRandomColor() {
+      const hue = Math.floor(Math.random() * 360);
+      return `hsl(${hue}, 70%, 60%)`;
+    }
+
+    function spawnBlob() {
+      const radius = 30 + Math.random() * 20;
+      const blob = Bodies.circle(
+        Math.random() * canvas.width,
+        canvas.height - 100,
+        radius,
+        {
+          restitution: 0.2,
+          friction: 0.9,
+          frictionStatic: 0.9,
+          frictionAir: 0.02,
+          render: {
+            fillStyle: getRandomColor()
+          },
+          label: 'blob',
+        }
+      );
+
+      blob.personality = {
+        curious: true,
+        scared: false,
+        agitation: 0,
+        grounded: false
+      };
+
+      blobs.push(blob);
+      Composite.add(world, blob);
+    }
+
+    function clearBlobs() {
+      blobs.forEach(blob => Composite.remove(world, blob));
+      blobs.length = 0;
+    }
+
+    function placePortal(x, y, isBlue) {
+      const portal = Bodies.rectangle(x, y, 20, 80, {
+        isSensor: true,
+        isStatic: true,
+        angle: isBlue ? 0 : Math.PI,
+        label: isBlue ? 'portalA' : 'portalB',
+        render: {
+          fillStyle: isBlue ? '#1b75d1' : '#ff6a00'
+        }
+      });
+      if (isBlue) {
+        if (portalA) Composite.remove(world, portalA);
+        portalA = portal;
+      } else {
+        if (portalB) Composite.remove(world, portalB);
+        portalB = portal;
+      }
+      Composite.add(world, portal);
+    }
+
+    function togglePortalGun() {
+      portalGunActive = !portalGunActive;
+      document.querySelector('#ui button:nth-child(3)').textContent = `Portal Gun: ${portalGunActive ? 'On' : 'Off'}`;
+    }
+
+    function clearPortals() {
+      if (portalA) Composite.remove(world, portalA);
+      if (portalB) Composite.remove(world, portalB);
+      portalA = null;
+      portalB = null;
+    }
+
+
+    Events.on(engine, 'collisionStart', event => {
+      event.pairs.forEach(pair => {
+        const labels = [pair.bodyA.label, pair.bodyB.label];
+        const blob = labels.includes('blob') ? (pair.bodyA.label === 'blob' ? pair.bodyA : pair.bodyB) : null;
+        const other = blob === pair.bodyA ? pair.bodyB : pair.bodyA;
+
+        if (blob && (other === portalA || other === portalB) && !inPortal.has(blob)) {
+          const target = (other === portalA) ? portalB : portalA;
+          if (target) {
+            inPortal.add(blob);
+            const offset = Vector.rotate({ x: 50, y: 0 }, target.angle);
+            const newPosition = Vector.add(target.position, offset);
+            const velocity = Vector.rotate(blob.velocity, target.angle - other.angle);
+            Body.setPosition(blob, newPosition);
+            Body.setVelocity(blob, velocity);
+            setTimeout(() => inPortal.delete(blob), 50);
+          }
+        }
+      });
+    });
+
+    const mouse = Mouse.create(canvas);
+    const mouseConstraint = MouseConstraint.create(engine, {
+      mouse: mouse,
+      constraint: {
+        stiffness: 0.2,
+        render: { visible: false }
+      },
+      collisionFilter: {
+        mask: 0x0001
+      }
+    });
+    Composite.add(world, mouseConstraint);
+    render.mouse = mouse;
+
+    Events.on(engine, 'beforeUpdate', () => {
+      const now = Date.now();
+
+      // Step 0.5: grow and split
+      for (let i = blobs.length - 1; i >= 0; i--) {
+        const blob = blobs[i];
+        const personality = blob.personality;
+        if (!personality || personality.dead) continue;
+
+        if (!personality.ageOffset) personality.ageOffset = Math.floor(Math.random() * 600); // ~10s difference
+        personality.age = (personality.age || 0) + 1;
+        const growthInterval = 120;
+
+        // grow over time
+        if (blob.circleRadius < 60 && personality.age % growthInterval === 0) {
+          const scale = 1.01;
+          Body.scale(blob, scale, scale);
+          blob.circleRadius *= scale;
+        }
+
+        // set fill color based on age/size (light green when small, darker green when grown)
+        const greenIntensity = Math.max(100, 255 - Math.floor(blob.circleRadius * 2.5));
+        blob.render.fillStyle = `rgb(100, ${greenIntensity}, 120)`;
+
+        // split if big and old enough
+        if (blob.circleRadius >= 60 && personality.age > 7200 + personality.ageOffset) {
+          const pos = blob.position;
+          const numChildren = Math.random() < 0.4 ? 1 : 2;
+
+          for (let j = 0; j < numChildren; j++) {
+            const baby = Bodies.circle(
+              pos.x + (Math.random() - 0.5) * 20,
+              pos.y - 10,
+              20,
+              {
+                restitution: 0.9,
+                frictionAir: 0.02,
+                label: 'blob',
+                render: { fillStyle: '#44cc44' }
+              }
+            );
+            baby.personality = {
+              curious: true,
+              scared: false,
+              agitation: 0,
+              trauma: 0,
+              dead: false,
+              age: 0
+            };
+            Composite.add(world, baby);
+            blobs.push(baby);
+          }
+
+          Composite.remove(world, blob);
+          blobs.splice(i, 1);
+          continue;
+        }
+      }
+
+      // Step 0.6: update trauma state and add shiver if scared
+      blobs.forEach(blob => {
+        const personality = blob.personality;
+        if (!personality || personality.dead) return;
+
+        if (!personality.traumaState) {
+          personality.traumaState = 'healthy';
+          personality.traumaEnteredAt = now;
+        }
+
+        const trauma = personality.trauma || 0;
+        const traumaLevel = trauma >= 800 ? 'critical' : trauma >= 600 ? 'red' : trauma >= 400 ? 'orange' : trauma >= 200 ? 'yellow' : 'healthy';
+
+        if (traumaLevel !== personality.traumaState) {
+          const timeInState = now - (personality.traumaEnteredAt || 0);
+          const canPromote = timeInState > 5000 || trauma < 200;
+          if (canPromote) {
+            personality.traumaState = traumaLevel;
+            personality.traumaEnteredAt = now;
+          }
+        }
+
+        if (personality.scared) {
+          const jitterX = (Math.random() - 0.5) * 0.004;
+          const jitterY = (Math.random() - 0.5) * 0.004;
+          Body.applyForce(blob, blob.position, { x: jitterX, y: jitterY });
+        }
+      });
+
+      // Step 0.65: draw colored heart pulse aura based on trauma level
+      const context = render.context;
+      context.save();
+      blobs.forEach(blob => {
+        const personality = blob.personality;
+        if (!personality || personality.dead) return;
+
+        const pulse = 6 + Math.sin(now / 150 + blob.id) * 4;
+        const alpha = 0.2 + (Math.sin(now / 150 + blob.id) + 1) * 0.2;
+
+        context.beginPath();
+        context.arc(blob.position.x, blob.position.y, blob.circleRadius + pulse, 0, Math.PI * 2);
+        let pulseColor = [100, 255, 100];
+        if (personality.traumaState === 'yellow') pulseColor = [255, 255, 100];
+        else if (personality.traumaState === 'orange') pulseColor = [255, 180, 80];
+        else if (personality.traumaState === 'red') pulseColor = [255, 80, 80];
+        else if (personality.traumaState === 'critical') pulseColor = [255, 0, 0];
+
+        context.strokeStyle = `rgba(${pulseColor[0]}, ${pulseColor[1]}, ${pulseColor[2]}, ${alpha})`;
+        context.lineWidth = 4;
+        context.stroke();
+      });
+      context.restore();
+
+      // Step 1: determine who is scared by motion, crushed, and track overexertion
+      blobs.forEach(blob => {
+        const { position, personality, velocity, circleRadius } = blob;
+        if (!personality || personality.dead) return;
+
+        const speed = Vector.magnitude(velocity);
+
+        // If the blob is flung too hard, increase damage
+        if (speed > 10) {
+          personality.agitation = 80;
+          personality.scared = true;
+          personality.trauma = (personality.trauma || 0) + speed * 0.25;
+        } else {
+          personality.agitation = Math.max(0, personality.agitation - 0.2);
+          if (personality.agitation < 5) personality.scared = false;
+          personality.trauma = Math.max(0, (personality.trauma || 0) - 0.3);
+        }
+
+        const trauma = personality.trauma || 0;
+
+        // Size-based green tint shift (larger blob = darker green)
+        let greenLevel = Math.max(64, 255 - Math.floor((circleRadius || 30) * 3));
+        greenLevel = Math.min(greenLevel, 255);
+
+
+
+        // Slow movement with trauma
+const slowdown = Math.min(1, trauma / 300);
+Body.setVelocity(blob, {
+  x: blob.velocity.x * (1 - slowdown * 0.3),
+  y: blob.velocity.y
+});
+
+// Check if the blob is near the ground and has multiple blobs above it
+let stackPressure = 0;
+blobs.forEach(other => {
+  if (other === blob || other.personality?.dead) return;
+  if (
+    other.position.y < blob.position.y - 10 &&
+    Math.abs(other.position.x - blob.position.x) < (blob.circleRadius || 30)
+  ) {
+    stackPressure++;
+  }
+});
+
+if (blob.position.y > canvas.height - 100 && stackPressure >= 3) {
+  personality.trauma = (personality.trauma || 0) + 0.5;
+}
+
+        // Death condition
+        if (trauma > 1000 && !personality.dead) {
+          personality.dead = true;
+          personality.deathTime = now;
+          blob.render.fillStyle = '#666';
+
+          // Let it fall to the ground, then freeze
+          setTimeout(() => {
+            if (blobs.includes(blob)) {
+              Body.setStatic(blob, true);
+            }
+          }, 1000);
+        }
+
+        // EXAGGERATED blobby wobble based on velocity (only if alive)
+        const scaleFactor = Math.min(1 + speed * 0.15, 2.0);
+        const squash = 1 / scaleFactor;
+        blob.render.sprite = blob.render.sprite || {};
+        blob.render.sprite.xScale = scaleFactor;
+        blob.render.sprite.yScale = squash;
+      });
+
+      // Step 1.5: spawn ghost + remove dead blobs after 4 seconds
+      for (let i = blobs.length - 1; i >= 0; i--) {
+        const blob = blobs[i];
+        if (blob.personality?.dead && now - blob.personality.deathTime > 4000) {
+          // spawn ghost
+          const ghost = Bodies.circle(blob.position.x, blob.position.y, 10, {
+            isSensor: true,
+            isStatic: false,
+            frictionAir: 0.02,
+            render: {
+              fillStyle: 'rgba(255,255,255,0.5)'
+            },
+            label: 'ghost'
+          });
+          Body.setVelocity(ghost, { x: 0, y: -2 });
+          Composite.add(world, ghost);
+
+          setTimeout(() => {
+            Composite.remove(world, ghost);
+          }, 2000);
+
+          Composite.remove(world, blob);
+          blobs.splice(i, 1);
+        }
+      }
+
+      // Step 2: spread fear to nearby blobs
+      blobs.forEach(blob => {
+        if (!blob.personality || !blob.personality.scared || blob.personality.dead) return;
+
+        blobs.forEach(other => {
+          if (other === blob || !other.personality || other.personality.dead) return;
+          const d = Vector.magnitude(Vector.sub(blob.position, other.position));
+          if (d < 100) {
+            other.personality.agitation = Math.max(other.personality.agitation, 50);
+          }
+        });
+      });
+
+      // Step 3: hop logic
+      blobs.forEach(blob => {
+        const { position, personality } = blob;
+        if (!personality || personality.dead) return;
+
+        const toMouse = Vector.sub(mouse.position, position);
+        const dist = Vector.magnitude(toMouse);
+        const dir = Vector.normalise(toMouse);
+
+        const grounded = Math.abs(blob.velocity.y) < 0.5;
+
+        // Random idle bunny hop
+        if (grounded && Math.random() < 0.02) {
+          Body.applyForce(blob, position, {
+            x: (Math.random() - 0.5) * 0.01,
+            y: -0.035
+          });
+        }
+
+        // Mouse-directed bunny hop
+        if (grounded && dist < 400 && Math.random() < 0.25) {
+          const jump = personality.scared ? -0.035 : -0.045;
+          const speed = personality.scared ? -0.03 : 0.02;
+          Body.applyForce(blob, position, {
+            x: dir.x * speed,
+            y: jump
+          });
+        }
+      });
+    });
+
+
+    canvas.addEventListener('mousedown', function(e) {
+      const mousePos = mouse.position;
+
+      if (portalGunActive) {
+        if (!portalA) {
+          placePortal(mousePos.x, mousePos.y, true);
+        } else {
+          placePortal(mousePos.x, mousePos.y, false);
+        }
+        return;
+      }
+
+      selectedPortal = null;
+      [portalA, portalB].forEach(portal => {
+        if (portal && Matter.Bounds.contains(portal.bounds, mousePos)) {
+          selectedPortal = portal;
+        }
+      });
+
+      const clickedBlobs = Query.point(blobs, mousePos);
+      clickedBlobs.forEach(blob => {
+        Body.applyForce(blob, blob.position, { x: 0, y: -0.05 });
+        blob.render.fillStyle = 'white';
+        // no override — natural color will update next frame
+
+      });
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (!selectedPortal) return;
+      if (e.key === 'q') Body.rotate(selectedPortal, -Math.PI / 18);
+      if (e.key === 'e') Body.rotate(selectedPortal, Math.PI / 18);
+    });
+
+    window.addEventListener('resize', () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      render.canvas.width = canvas.width;
+      render.canvas.height = canvas.height;
+      Body.setPosition(ground, { x: canvas.width / 2, y: canvas.height + 25 });
+    });
+  </script>
+</body>
+</html>
