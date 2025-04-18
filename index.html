@@ -294,6 +294,24 @@
       });
       context.restore();
 
+      // Step 0.7: touch support for mobile
+      canvas.addEventListener('touchstart', (e) => {
+        const touch = e.touches[0];
+        mouse.position.x = touch.clientX;
+        mouse.position.y = touch.clientY;
+      });
+
+      canvas.addEventListener('touchmove', (e) => {
+        const touch = e.touches[0];
+        mouse.position.x = touch.clientX;
+        mouse.position.y = touch.clientY;
+      });
+
+      canvas.addEventListener('touchend', () => {
+        mouse.position.x = -1000;
+        mouse.position.y = -1000;
+      });
+
       // Step 1: determine who is scared by motion, crushed, and track overexertion
       blobs.forEach(blob => {
         const { position, personality, velocity, circleRadius } = blob;
