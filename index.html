@@ -50,9 +50,9 @@
   <div id="ui">
     <button onclick="spawnBlob()">Spawn Blob</button>
     <button onclick="clearBlobs()">Wipe out Blobs</button>
-    <button onclick="togglePortalGun()">Portal Gun: Off</button>
+    <button onclick="togglePortalGun()" id="portalToggle">Portal Gun: Off</button>
     <button onclick="clearPortals()">Clear Portals</button>
-    <button onclick="toggleDeathTouch()">Death Touch: Off</button>
+    <button onclick="toggleDeathTouch()" id="deathToggle">Death Touch: Off</button>
 
 
     <p>Click a portal, then press Q/E to rotate</p>
@@ -98,9 +98,12 @@
     let deathTouchActive = false;
 
     function toggleDeathTouch() {
-      deathTouchActive = !deathTouchActive;
-      document.querySelector('#ui button:nth-child(5)').textContent = `Death Touch: ${deathTouchActive ? 'On' : 'Off'}`;
-    }
+  deathTouchActive = !deathTouchActive;
+  const btn = document.getElementById('deathToggle');
+  btn.textContent = `Death Touch: ${deathTouchActive ? 'On' : 'Off'}`;
+  btn.style.color = deathTouchActive ? 'lime' : 'grey';
+}
+
 
 
     function getRandomColor() {
@@ -187,9 +190,12 @@
     }
 
     function togglePortalGun() {
-      portalGunActive = !portalGunActive;
-      document.querySelector('#ui button:nth-child(3)').textContent = `Portal Gun: ${portalGunActive ? 'On' : 'Off'}`;
-    }
+  portalGunActive = !portalGunActive;
+  const btn = document.getElementById('portalToggle');
+  btn.textContent = `Portal Gun: ${portalGunActive ? 'On' : 'Off'}`;
+  btn.style.color = portalGunActive ? 'lime' : 'grey';
+}
+
 
     function clearPortals() {
       if (portalA) Composite.remove(world, portalA);
@@ -513,11 +519,19 @@ if (blob.position.y > canvas.height - 100 && stackPressure >= 3) {
         }
 
         // Mouse-directed bunny hop
-        if (isTouching && dist < 400 && Math.random() < 0.55) {
-          const jump = personality.scared ? -0.025 : -0.055;
-          const speed = personality.scared ? -0.03 : 0.02;
+        if (isTouching && dist < 400 && Math.random() < 0.25) {
+          const baseJump = -0.045;
+          const baseSpeed = 0.02;
+                
+          // When scared: jump higher and push away from the mouse
+          const jump = personality.scared ? baseJump * 1.2 : baseJump;
+          const speed = personality.scared ? baseSpeed * 2.5 : baseSpeed;
+                
+          // Direction away from the mouse
+          const fleeDir = personality.scared ? Vector.neg(dir) : dir;
+                
           Body.applyForce(blob, position, {
-            x: dir.x * speed,
+            x: fleeDir.x * speed,
             y: jump
           });
         }
