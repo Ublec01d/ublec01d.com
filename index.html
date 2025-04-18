@@ -644,6 +644,26 @@ if (blob.position.y > canvas.height - 100 && stackPressure >= 3) {
               blob.render.fillStyle = 'white';
             }
           }
+          if (deathTouchActive) {
+            if (!blob.personality?.dead) {
+              blob.personality.trauma = 2000; // insta-kill
+              blob.render.fillStyle = '#ff2222'; // flash red for style
+            
+              // 😱 Trigger panic only when a blob is actually killed
+              blobs.forEach(other => {
+                if (
+                  other !== blob &&
+                  other.personality &&
+                  !other.personality.dead
+                ) {
+                  other.personality.scared = true;
+                  other.personality.agitation = Math.max(other.personality.agitation, 100);
+                }
+              });
+            }
+          }
+          
+        
         });
       });
     
