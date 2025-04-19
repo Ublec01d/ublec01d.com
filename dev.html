@@ -18,6 +18,7 @@
   <div id="ui">
     <button onclick="spawnBlob()">Spawn Blob</button>
     <button onclick="spawnEvilBlob()" style="color:red">Spawn Evil</button>
+    <button onclick="spawnBlobzilla()" style="color:orange">Spawn Blobzilla</button>
     <button onclick="clearBlobs()">Wipe out Blobs</button>
     <button onclick="togglePortalGun()" id="portalToggle">Portal Gun: Off</button>
     <button onclick="clearPortals()">Clear Portals</button>
@@ -25,11 +26,11 @@
     <button onclick="rotateSelectedPortal('right')">⟳ Rotate Right</button>
     <button onclick="toggleDeathTouch()" id="deathToggle">Death Touch: Off</button>
     <div id="scoreboard">
-      <p>Spawned: <span id="stat-spawned">0</span></p>
-      <p>Born: <span id="stat-split">0</span></p>
-      <p>Dead: <span id="stat-dead">0</span></p>
+      <p>Spawned: <span id="stat-spawned">0</span> <span id="stat-spawned-evil" style="color:red">0</span></p>
+      <p>Born: <span id="stat-split">0</span> <span id="stat-split-evil" style="color:red">0</span></p>
+      <p>Dead: <span id="stat-dead">0</span> <span id="stat-dead-evil" style="color:red">0</span></p>
       <p>Blobzillas: <span id="stat-zilla">0</span></p>
-      <p>Alive: <span id="stat-alive">0</span></p>
+      <p>Alive: <span id="stat-alive">0</span> <span id="stat-alive-evil" style="color:red">0</span></p>
     </div>
   </div>
 
@@ -76,15 +77,21 @@
     let deathTouchActive = false;
 
     const stats = { spawned: 0, split: 0, zilla: 0, dead: 0 };
+    const statsEvil = { spawned: 0, split: 0, dead: 0 };
     const updateHUD = () => {
       for (const k in stats) {
         const el = document.getElementById(`stat-${k}`);
         if (el) el.textContent = stats[k];
       }
-      // alive = blobs that are not dead
-      const aliveCount = blobs.filter(b => !b.personality.dead).length;
-      const aliveEl = document.getElementById('stat-alive');
-      if (aliveEl) aliveEl.textContent = aliveCount;
+      // evil stats
+      document.getElementById('stat-spawned-evil').textContent = statsEvil.spawned;
+      document.getElementById('stat-split-evil').textContent   = statsEvil.split;
+      document.getElementById('stat-dead-evil').textContent    = statsEvil.dead;
+      // alive counts
+      const aliveGood = blobs.filter(b => !b.personality.dead && !b.personality.evil).length;
+      const aliveEvil = blobs.filter(b => !b.personality.dead &&  b.personality.evil).length;
+      document.getElementById('stat-alive').textContent      = aliveGood;
+      document.getElementById('stat-alive-evil').textContent = aliveEvil;
     };
 
     /* Color helpers */
@@ -129,19 +136,48 @@
         touching: new Set(),
         evil: false,
         hp: r * 2,
-              maxHp: r * 2
-
-
+        maxHp: r * 2,
       };
       blobs.push(blob);
       Composite.add(world, blob);
       stats.spawned++;
+      
       if (blob.personality.unkillableBlobzilla) stats.zilla++;
       updateHUD();
     }
 
     
     /* Evil blob factory */
+
+    // Blobzilla (unkillable) factory
+    function spawnBlobzilla(x = canvas.width/2, y = canvas.height/4, r = 40 + Math.random()*20) {
+      const blob = Bodies.circle(x, y, r, {
+        restitution: 0.2,
+        frictionAir: 0.005,
+        label: 'blob',
+        collisionFilter: { category: 0x0001 },
+        render: { fillStyle: greenTint(r) }
+      });
+      blob.circleRadius = r;
+      blob.personality = {
+        age: 0,
+        ageOffset: 0,
+        scared: false,
+        agitation: 0,
+        trauma: 0,
+        fakeDead: false,
+        unkillableBlobzilla: true,
+        touching: new Set(),
+        evil: false,
+        hp: r * 4,
+        maxHp: r * 4
+      };
+      blobs.push(blob);
+      Composite.add(world, blob);
+      stats.spawned++;
+      stats.zilla++;
+      updateHUD();
+    }
     function spawnEvilBlob(x = Math.random()*canvas.width, y = Math.random()*canvas.height/2, r = 12 + Math.random()*22) {
       const blob = Bodies.circle(x, y, r, {
         restitution: 0.2,
@@ -167,9 +203,10 @@
       };
       blobs.push(blob);
       Composite.add(world, blob);
-      stats.spawned++;
+      statsEvil.spawned++;
       updateHUD();
     }
+    
 
     function markDead(blob) {
       if (blob.personality.dead) return;
@@ -179,7 +216,11 @@
       blob.personality.dead = true;
       blob.personality.deathTime = Date.now();
       blob.render.fillStyle = '#666';
-      stats.dead++;
+      if (blob.personality.evil) {
+        statsEvil.dead++;
+      } else {
+        stats.dead++;
+      }
       updateHUD();
       // allow body to keep falling; no static freeze
     }
@@ -273,6 +314,7 @@
                   }
         })
       });
+   
     Events.on(engine, 'collisionEnd', ev => {
       ev.pairs.forEach(({ bodyA, bodyB }) => {
         const blob = [bodyA, bodyB].find(b => b.label === 'blob');
@@ -299,7 +341,7 @@
         if (blob.circleRadius >= 60 && p.age > 7200 + p.ageOffset && !p.unkillableBlobzilla) {
           const parentR = blob.circleRadius;
           const pos = blob.position;
-          const count = Math.random() < 0.4 ? 1 : 2;
+          const count = 2;
           for (let j = 0; j < count; j++) {
             const r = Math.max(6, parentR * (0.25 + Math.random() * 0.15)); // 25‑40% size
             const isEvil = p.evil;
@@ -321,11 +363,12 @@
               unkillableBlobzilla: Math.random() < 0.01,
               touching: new Set(),
               evil: isEvil,
-              hp: r * 2
+              hp: r * 2,
+              maxHp: r * 2
             };
             blobs.push(baby);
             Composite.add(world, baby);
-            stats.split++;
+            if (isEvil) statsEvil.split++; else stats.split++;
             if (baby.personality.unkillableBlobzilla) stats.zilla++;
           }
           // parent dies and spawns ghost
@@ -360,6 +403,11 @@
           if (p.agitation < 10 && (!p.scaredUntil || now > p.scaredUntil)) p.scared = false;
         }
         if (p.trauma > 1000 && !p.unkillableBlobzilla) markDead(blob);
+        // Passive health regen & trauma recovery
+        if (!p.dead && p.hp < p.maxHp) {
+          p.hp = Math.min(p.maxHp, p.hp + 0.05); // heal rate
+        }
+        p.trauma = Math.max(0, p.trauma - 0.1);
 
         // Hop & movement
         const touching = p.touching.size > 0;
