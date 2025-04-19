@@ -71,6 +71,7 @@
     const inPortal = new WeakSet();
     let heldBlob = null;
     let selectedPortal = null;
+    let draggingPortal = null;
     let portalA = null;
     let portalB = null;
     let portalGunActive = false;
@@ -314,7 +315,7 @@
                   }
         })
       });
-   
+    
     Events.on(engine, 'collisionEnd', ev => {
       ev.pairs.forEach(({ bodyA, bodyB }) => {
         const blob = [bodyA, bodyB].find(b => b.label === 'blob');
@@ -341,7 +342,7 @@
         if (blob.circleRadius >= 60 && p.age > 7200 + p.ageOffset && !p.unkillableBlobzilla) {
           const parentR = blob.circleRadius;
           const pos = blob.position;
-          const count = 2;
+          const count = Math.random() < 0.4 ? 1 : 2;
           for (let j = 0; j < count; j++) {
             const r = Math.max(6, parentR * (0.25 + Math.random() * 0.15)); // 25‑40% size
             const isEvil = p.evil;
@@ -478,6 +479,30 @@
         }
       }
     });
+
+    // ----- Portal dragging -----
+    const startPortalDrag = pos => {
+      draggingPortal = [portalA, portalB].find(p => p && Matter.Bounds.contains(p.bounds, pos));
+    };
+    canvas.addEventListener('mousedown', () => startPortalDrag(mouse.position));
+    canvas.addEventListener('touchstart', e => {
+      const t = e.touches[0];
+      startPortalDrag({ x: t.clientX, y: t.clientY });
+    }, { passive: false });
+
+    canvas.addEventListener('mousemove', e => {
+      if (draggingPortal) Body.setPosition(draggingPortal, { x: e.clientX, y: e.clientY });
+    });
+    canvas.addEventListener('touchmove', e => {
+      if (draggingPortal) {
+        const t = e.touches[0];
+        Body.setPosition(draggingPortal, { x: t.clientX, y: t.clientY });
+      }
+    }, { passive: false });
+    const stopDrag = () => { draggingPortal = null; };
+    canvas.addEventListener('mouseup', stopDrag);
+    canvas.addEventListener('touchend', stopDrag);
+    canvas.addEventListener('touchcancel', stopDrag);
 
     /* Responsive */
     addEventListener('resize', () => {
