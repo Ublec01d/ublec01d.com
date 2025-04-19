@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Blobverse — The Micro‑Multiverse</title>
+  <style>
+    html,body{margin:0;padding:0;overflow:hidden;background:#000;color:#fff;font-family:"Segoe UI",sans-serif}
+    canvas{display:block}
+    #ui{position:absolute;top:10px;left:10px;background:rgba(0,0,0,.5);padding:10px;border-radius:10px}
+    #ui button{background:transparent;border:none;color:grey;font-family:"Courier New",monospace;font-size:1.1em;font-weight:bold;padding:4px 10px;margin:3px 0;cursor:pointer;transition:background .2s,color .2s}
+    #ui button:hover{background:lime;color:#000;border-radius:4px}
+    #scoreboard{font-family:monospace;font-size:17px;margin-top:8px}
+  </style>
+</head>
+<body>
+  <canvas id="world"></canvas>
+  <div id="ui">
+    <button onclick="spawnBlob()">Spawn Blob</button>
+    <button onclick="spawnEvilBlob()" style="color:red">Spawn Evil</button>
+    <button onclick="clearBlobs()">Wipe out Blobs</button>
+    <button onclick="togglePortalGun()" id="portalToggle">Portal Gun: Off</button>
+    <button onclick="clearPortals()">Clear Portals</button>
+    <button onclick="rotateSelectedPortal('left')">⟲ Rotate Left</button>
+    <button onclick="rotateSelectedPortal('right')">⟳ Rotate Right</button>
+    <button onclick="toggleDeathTouch()" id="deathToggle">Death Touch: Off</button>
+    <div id="scoreboard">
+      <p>Spawned: <span id="stat-spawned">0</span></p>
+      <p>Born: <span id="stat-split">0</span></p>
+      <p>Dead: <span id="stat-dead">0</span></p>
+      <p>Blobzillas: <span id="stat-zilla">0</span></p>
+      <p>Alive: <span id="stat-alive">0</span></p>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/matter-js@0.19.0/build/matter.min.js"></script>
+  <script>
+    const { Engine, Render, Runner, Bodies, Composite, Body, Events, Mouse, MouseConstraint, Vector, Query } = Matter;
+
+    /* Engine & Renderer */
+    const engine = Engine.create();
+    const world = engine.world;
+    world.gravity.y = 1;
+
+    const canvas = document.getElementById('world');
+    canvas.width = innerWidth;
+    canvas.height = innerHeight;
+
+    const render = Render.create({
+      canvas,
+      engine,
+      options: { width: canvas.width, height: canvas.height, background: '#000', wireframes: false }
+    });
+    Render.run(render);
+    Runner.run(Runner.create(), engine);
+
+    /* Boundaries */
+    const WALL = 200;
+    Composite.add(world, [
+      Bodies.rectangle(-WALL/2, canvas.height/2, WALL, canvas.height, { isStatic: true, render: { visible: false } }),
+      Bodies.rectangle(canvas.width + WALL/2, canvas.height/2, WALL, canvas.height, { isStatic: true, render: { visible: false } }),
+      Bodies.rectangle(canvas.width/2, canvas.height + WALL/2, canvas.width, WALL, { isStatic: true, render: { visible: false } }),
+      Bodies.rectangle(canvas.width/2, -WALL*1.5, canvas.width, WALL, { isStatic: true, render: { visible: false } })
+    ]);
+
+    /* State */
+    const blobs = [];
+    // Ghost sprites for cute death animation
+    const ghosts = [];
+    const inPortal = new WeakSet();
+    let heldBlob = null;
+    let selectedPortal = null;
+    let portalA = null;
+    let portalB = null;
+    let portalGunActive = false;
+    let deathTouchActive = false;
+
+    const stats = { spawned: 0, split: 0, zilla: 0, dead: 0 };
+    const updateHUD = () => {
+      for (const k in stats) {
+        const el = document.getElementById(`stat-${k}`);
+        if (el) el.textContent = stats[k];
+      }
+      // alive = blobs that are not dead
+      const aliveCount = blobs.filter(b => !b.personality.dead).length;
+      const aliveEl = document.getElementById('stat-alive');
+      if (aliveEl) aliveEl.textContent = aliveCount;
+    };
+
+    /* Color helpers */
+    const greenTint = r => {
+      const g = Math.max(100, 255 - Math.floor(r * 2.5));
+      return `rgb(100,${g},120)`;
+    };
+
+    // Red tint darkens as blob grows
+    const redTint = r => {
+      const shade = Math.max(60, 255 - Math.floor(r * 2)); // 25‑>255→darken
+      return `rgb(${shade},40,40)`;
+    };
+
+    /* Fear propagation */
+    const spreadFear = (src, dur = 8000) => blobs.forEach(b => {
+      if (b !== src && !b.personality.dead) {
+        b.personality.scared = true;
+        b.personality.agitation = Math.max(b.personality.agitation, 100);
+        b.personality.scaredUntil = Date.now() + dur;
+      }
+    });
+
+    /* Blob factory */
+    function spawnBlob(x = Math.random()*canvas.width, y = Math.random()*canvas.height/2, r = 10 + Math.random()*20) {
+      const blob = Bodies.circle(x, y, r, {
+        restitution: 0.2,
+        frictionAir: 0.005,
+        label: 'blob',
+        collisionFilter: { category: 0x0001 },
+        render: { fillStyle: greenTint(r) }
+      });
+      blob.circleRadius = r;
+      blob.personality = {
+        age: 0,
+        ageOffset: Math.floor(Math.random()*600),
+        scared: false,
+        agitation: 0,
+        trauma: 0,
+        fakeDead: false,
+        unkillableBlobzilla: Math.random() < 0.01,
+        touching: new Set(),
+        evil: false,
+        hp: r * 2,
+              maxHp: r * 2
+
+
+      };
+      blobs.push(blob);
+      Composite.add(world, blob);
+      stats.spawned++;
+      if (blob.personality.unkillableBlobzilla) stats.zilla++;
+      updateHUD();
+    }
+
+    
+    /* Evil blob factory */
+    function spawnEvilBlob(x = Math.random()*canvas.width, y = Math.random()*canvas.height/2, r = 12 + Math.random()*22) {
+      const blob = Bodies.circle(x, y, r, {
+        restitution: 0.2,
+        frictionAir: 0.005,
+        label: 'blob',
+        collisionFilter: { category: 0x0001 },
+        render: { fillStyle: redTint(r) }
+      });
+      blob.circleRadius = r;
+      blob.personality = {
+        age: 0,
+        ageOffset: Math.floor(Math.random()*600),
+        scared: false,
+        agitation: 0,
+        trauma: 0,
+        fakeDead: false,
+        unkillableBlobzilla: false,
+        touching: new Set(),
+        evil: true,
+        hp: r * 2,
+        maxHp: r * 2,
+        dead: false
+      };
+      blobs.push(blob);
+      Composite.add(world, blob);
+      stats.spawned++;
+      updateHUD();
+    }
+
+    function markDead(blob) {
+      if (blob.personality.dead) return;
+      if (blob.personality.unkillableBlobzilla) {
+        stats.zilla = Math.max(0, stats.zilla - 1);
+      }
+      blob.personality.dead = true;
+      blob.personality.deathTime = Date.now();
+      blob.render.fillStyle = '#666';
+      stats.dead++;
+      updateHUD();
+      // allow body to keep falling; no static freeze
+    }
+    function clearBlobs() {
+      [...blobs].forEach((b, i) => setTimeout(() => { markDead(b); spreadFear(b, 10000); b.personality.trauma = 2000; }, i*120));
+    }
+
+    /* Portal helpers */
+    function placePortal(x, y, isBlue) {
+      const p = Bodies.rectangle(x, y, 20, 80, {
+        isSensor: true,
+        isStatic: true,
+        angle: isBlue ? 0 : Math.PI,
+        label: isBlue ? 'portalA' : 'portalB',
+        render: { fillStyle: isBlue ? '#1b75d1' : '#ff6a00' }
+      });
+      if (isBlue) {
+        if (portalA) Composite.remove(world, portalA);
+        portalA = p;
+      } else {
+        if (portalB) Composite.remove(world, portalB);
+        portalB = p;
+      }
+      Composite.add(world, p);
+    }
+    const togglePortalGun = () => {
+      portalGunActive = !portalGunActive;
+      const b = document.getElementById('portalToggle');
+      b.textContent = `Portal Gun: ${portalGunActive ? 'On' : 'Off'}`;
+      b.style.color = portalGunActive ? 'lime' : 'grey';
+    };
+    const clearPortals = () => { if (portalA) Composite.remove(world, portalA); if (portalB) Composite.remove(world, portalB); portalA = portalB = null; };
+    const rotateSelectedPortal = dir => selectedPortal && Body.rotate(selectedPortal, (dir === 'left' ? -1 : 1) * Math.PI/18);
+
+    /* Death‑Touch */
+    const toggleDeathTouch = () => {
+      deathTouchActive = !deathTouchActive;
+      const b = document.getElementById('deathToggle');
+      b.textContent = `Death Touch: ${deathTouchActive ? 'On' : 'Off'}`;
+      b.style.color = deathTouchActive ? 'lime' : 'grey';
+    };
+
+    /* Mouse & touch */
+    const mouse = Mouse.create(canvas);
+    const mc = MouseConstraint.create(engine, { mouse, constraint: { stiffness: 0.2, render: { visible: false } }, collisionFilter: { mask: 0x0001 } });
+    Composite.add(world, mc);
+    render.mouse = mouse;
+
+    function handlePointer(pos) {
+      if (portalGunActive) { placePortal(pos.x, pos.y, !portalA); return; }
+      selectedPortal = [portalA, portalB].find(p => p && Matter.Bounds.contains(p.bounds, pos));
+      Query.point(blobs, pos).forEach(b => {
+        if (deathTouchActive) { markDead(b); spreadFear(b); return; }
+        if (!b.personality.dead) { heldBlob = b; b.personality.fakeDead = true; Body.setInertia(b, Infinity); }
+      });
+    }
+    canvas.addEventListener('mousedown', () => handlePointer(mouse.position));
+    canvas.addEventListener('touchstart', e => { const t = e.touches[0]; handlePointer({ x: t.clientX, y: t.clientY }); }, { passive: false });
+    Events.on(mc, 'enddrag', () => { if (heldBlob) { heldBlob.personality.fakeDead = false; Body.setInertia(heldBlob, heldBlob.mass); heldBlob = null; } });
+
+    /* Collision bookkeeping */
+    Events.on(engine, 'collisionStart', ev => {
+      ev.pairs.forEach(({ bodyA, bodyB }) => {
+        const blob = [bodyA, bodyB].find(b => b.label === 'blob');
+        if (!blob) return;
+        const other = blob === bodyA ? bodyB : bodyA;
+        blob.personality.touching.add(other.id);
+        if ((other === portalA || other === portalB) && !inPortal.has(blob)) {
+          const target = other === portalA ? portalB : portalA;
+          if (!target) return;
+          inPortal.add(blob);
+          Body.setPosition(blob, Vector.add(target.position, Vector.rotate({ x: 50, y: 0 }, target.angle)));
+          Body.setVelocity(blob, Vector.rotate(blob.velocity, target.angle - other.angle));
+          setTimeout(() => inPortal.delete(blob), 50);
+        }
+
+        // Combat: blobs with different allegiance collide
+        if (bodyA.label === 'blob' && bodyB.label === 'blob') {
+          const a = bodyA, b = bodyB;
+          if (a.personality.evil !== b.personality.evil && !a.personality.dead && !b.personality.dead) {
+            const relVel = Vector.magnitude(Vector.sub(a.velocity, b.velocity));
+            const dmgA = b.circleRadius * relVel * 0.05;
+            const dmgB = a.circleRadius * relVel * 0.05;
+            a.personality.hp -= dmgA;
+            a.personality.trauma = (a.personality.trauma || 0) + dmgA * 2;
+            b.personality.hp -= dmgB;
+            b.personality.trauma = (b.personality.trauma || 0) + dmgB * 2;
+            if (a.personality.hp <= 0) markDead(a);
+            if (b.personality.hp <= 0) markDead(b);
+          }
+                  }
+        })
+      });
+    Events.on(engine, 'collisionEnd', ev => {
+      ev.pairs.forEach(({ bodyA, bodyB }) => {
+        const blob = [bodyA, bodyB].find(b => b.label === 'blob');
+        if (blob) blob.personality.touching.delete((blob === bodyA ? bodyB : bodyA).id);
+      });
+    });
+
+    /* Game loop */
+    Events.on(engine, 'beforeUpdate', () => {
+      const now = Date.now();
+      for (let i = blobs.length - 1; i >= 0; i--) {
+        const blob = blobs[i];
+        const p = blob.personality;
+        if (p.dead) continue;
+
+        // Age & growth
+        p.age++;
+        if ((blob.circleRadius < 60 || p.unkillableBlobzilla) && p.age % 120 === 0) {
+          const s = p.unkillableBlobzilla ? 1 + Math.min(0.0025, 20 / blob.circleRadius) : 1.01;
+          Body.scale(blob, s, s);
+          blob.circleRadius *= s;
+        }
+        // Split if large and old enough
+        if (blob.circleRadius >= 60 && p.age > 7200 + p.ageOffset && !p.unkillableBlobzilla) {
+          const parentR = blob.circleRadius;
+          const pos = blob.position;
+          const count = Math.random() < 0.4 ? 1 : 2;
+          for (let j = 0; j < count; j++) {
+            const r = Math.max(6, parentR * (0.25 + Math.random() * 0.15)); // 25‑40% size
+            const isEvil = p.evil;
+            const babyColor = isEvil ? redTint(r) : greenTint(r);
+            const baby = Bodies.circle(pos.x + (Math.random() - 0.5) * 20, pos.y - 10, r, {
+              restitution: 0.2,
+              frictionAir: 0.005,
+              label: 'blob',
+              render: { fillStyle: babyColor }
+            });
+            baby.circleRadius = r;
+            baby.personality = {
+              age: 0,
+              ageOffset: Math.floor(Math.random()*600),
+              scared: false,
+              agitation: 0,
+              trauma: p.trauma * 0.25,
+              fakeDead: false,
+              unkillableBlobzilla: Math.random() < 0.01,
+              touching: new Set(),
+              evil: isEvil,
+              hp: r * 2
+            };
+            blobs.push(baby);
+            Composite.add(world, baby);
+            stats.split++;
+            if (baby.personality.unkillableBlobzilla) stats.zilla++;
+          }
+          // parent dies and spawns ghost
+          markDead(blob);
+          ghosts.push({ x: blob.position.x, y: blob.position.y, start: now });
+          Composite.remove(world, blob);
+          blobs.splice(i, 1);
+          continue;
+        }
+
+        // Die of old age when reaching massive size
+        const MAX_RADIUS = 120;
+        if (blob.circleRadius >= MAX_RADIUS && !p.unkillableBlobzilla) {
+          markDead(blob);
+          // spawn ghost immediately for parent death
+          ghosts.push({ x: blob.position.x, y: blob.position.y, start: now });
+          Composite.remove(world, blob);
+          blobs.splice(i, 1);
+          continue;
+        }
+
+        // Trauma & fear from speed
+        const speed = Vector.magnitude(blob.velocity);
+        if (speed > 25) {
+          p.agitation = 100;
+          p.scared = true;
+          p.trauma += speed * 0.5;
+          p.scaredUntil = now + 5000;
+        } else {
+          p.agitation = Math.max(0, p.agitation - 0.4);
+          p.trauma = Math.max(0, p.trauma - 0.6);
+          if (p.agitation < 10 && (!p.scaredUntil || now > p.scaredUntil)) p.scared = false;
+        }
+        if (p.trauma > 1000 && !p.unkillableBlobzilla) markDead(blob);
+
+        // Hop & movement
+        const touching = p.touching.size > 0;
+        const toMouse = Vector.sub(mouse.position, blob.position);
+        const dist = Vector.magnitude(toMouse);
+        const dir = Vector.normalise(toMouse);
+        if (touching) {
+          // Older/bigger blobs hop higher but less often
+          const sizeFactor = Math.min(blob.circleRadius / 40, 3); // 0‑3 range
+
+          // Idle bunny hop
+          const idleChance = 0.02 / (1 + sizeFactor);            // less frequent when older
+          const idleJump   = -0.035 * (1 + 0.6 * sizeFactor);    // higher when older
+          if (Math.random() < idleChance) {
+            Body.applyForce(blob, blob.position, {
+              x: (Math.random() - 0.5) * 0.01,
+              y: idleJump
+            });
+          }
+
+          // Mouse‑directed hop (chase / flee)
+          const chaseChance = 0.25 / (1 + sizeFactor);
+          
+          // Enemy attraction — jump toward nearest opposing blob
+          const enemies = blobs.filter(o => o !== blob && !o.personality.dead && o.personality.evil !== p.evil);
+          if (enemies.length) {
+            // find closest enemy
+            let nearest = enemies[0];
+            let bestDist = Vector.magnitude(Vector.sub(nearest.position, blob.position));
+            for (let k = 1; k < enemies.length; k++) {
+              const d = Vector.magnitude(Vector.sub(enemies[k].position, blob.position));
+              if (d < bestDist) { bestDist = d; nearest = enemies[k]; }
+            }
+            if (bestDist < 500 && Math.random() < 0.3 / (1 + sizeFactor)) {
+              const toEnemy = Vector.normalise(Vector.sub(nearest.position, blob.position));
+              const atkJump = -0.05 * (1 + 0.8 * sizeFactor);
+              const atkSpeed = 0.03 * (1 + 0.5 * sizeFactor);
+              Body.applyForce(blob, blob.position, { x: toEnemy.x * atkSpeed, y: atkJump });
+            }
+          }
+          if (dist < 400 && Math.random() < chaseChance) {
+            const baseJump  = -0.045 * (1 + 0.8 * sizeFactor);
+            const baseSpeed = 0.02 * (1 + 0.4 * sizeFactor);
+            const flee = p.scared;
+            Body.applyForce(blob, blob.position, {
+              x: (flee ? -dir.x : dir.x) * (flee ? baseSpeed * 2.5 : baseSpeed),
+              y: flee ? baseJump * 1.2 : baseJump
+            });
+          }
+        }
+
+        // Visual wobble & tint update
+        const scale = Math.min(1 + speed*0.15, 2);
+        blob.render.sprite = blob.render.sprite || {};
+        blob.render.sprite.xScale = scale;
+        blob.render.sprite.yScale = 1/scale;
+        blob.render.fillStyle = p.dead ? '#666' : (p.evil ? redTint(blob.circleRadius) : greenTint(blob.circleRadius));
+      }
+
+      // Corpse cleanup + spawn ghost sprite
+      for (let i = blobs.length - 1; i >= 0; i--) {
+        const b = blobs[i];
+        if (b.personality.dead && now - b.personality.deathTime > 4000) {
+          // record ghost starting position
+          ghosts.push({ x: b.position.x, y: b.position.y, start: now });
+          Composite.remove(world, b);
+          blobs.splice(i, 1);
+        }
+      }
+    });
+
+    /* Responsive */
+    addEventListener('resize', () => {
+      canvas.width = innerWidth;
+      canvas.height = innerHeight;
+      render.canvas.width = canvas.width;
+      render.canvas.height = canvas.height;
+    });
+
+    /* Init HUD + portal UX */
+  updateHUD();
+
+  /* Keyboard Q/E rotation */
+  addEventListener('keydown', e => {
+    if (!selectedPortal) return;
+    if (e.key === 'q' || e.key === 'Q') rotateSelectedPortal('left');
+    if (e.key === 'e' || e.key === 'E') rotateSelectedPortal('right');
+  });
+
+  /* Visual glow around selected portal */
+  Events.on(render, 'afterRender', () => {
+    if (!selectedPortal) return;
+    const ctx = render.context;
+    ctx.save();
+    ctx.translate(selectedPortal.position.x, selectedPortal.position.y);
+    ctx.rotate(selectedPortal.angle);
+    ctx.beginPath();
+    ctx.rect(-10, -40, 20, 80);
+    ctx.shadowColor = 'white';
+    ctx.shadowBlur = 18;
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'white';
+    ctx.stroke();
+    ctx.restore();
+  });
+
+  /* Blob health aura (glowing "health bar") */
+  Events.on(render, 'afterRender', () => {
+    const ctx = render.context;
+    const now = Date.now();
+    ctx.save();
+    blobs.forEach(b => {
+      const p = b.personality;
+      if (!p || p.dead || p.fakeDead) return;
+      const hpPct = Math.max(0, p.hp / (p.maxHp || 1));
+      let col;
+      if (hpPct > 0.75) col = [100, 255, 100];          // green
+      else if (hpPct > 0.5) col = [255, 255, 100];      // yellow
+      else if (hpPct > 0.25) col = [255, 180, 80];      // orange
+      else col = [255, 80, 80];                         // red / critical
+      const pulse = 6 + Math.sin((now + b.id) / 150) * 4;
+      ctx.beginPath();
+      ctx.arc(b.position.x, b.position.y, b.circleRadius + pulse, 0, Math.PI * 2);
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = `rgba(${col[0]},${col[1]},${col[2]},0.35)`;
+      ctx.stroke();
+    });
+    ctx.restore();
+  });
+
+  /* Ghost float‑up animation */
+  Events.on(render, 'afterRender', () => {
+    const ctx = render.context;
+    const now = Date.now();
+    for (let i = ghosts.length - 1; i >= 0; i--) {
+      const g = ghosts[i];
+      const t = (now - g.start) / 2000; // 2‑second fade
+      if (t >= 1) { ghosts.splice(i, 1); continue; }
+      ctx.save();
+      ctx.globalAlpha = 1 - t;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(g.x, g.y - 50 * t, 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  });
+  </script>
+</body>
+</html>
