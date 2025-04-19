@@ -74,10 +74,43 @@
     const engine = Engine.create();
     const world = engine.world;
     world.gravity.y = 1;
+    
+
 
     const canvas = document.getElementById('world');
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
+    const wallThickness = 200;
+
+// Left wall
+const wallLeft = Bodies.rectangle(-wallThickness / 2, canvas.height / 2, wallThickness, canvas.height, {
+  isStatic: true,
+  render: { visible: false }
+});
+
+// Right wall
+const wallRight = Bodies.rectangle(canvas.width + wallThickness / 2, canvas.height / 2, wallThickness, canvas.height, {
+  isStatic: true,
+  render: { visible: false }
+});
+
+// Bottom wall (to catch blobs)
+const wallBottom = Bodies.rectangle(canvas.width / 2, canvas.height + wallThickness / 2, canvas.width, wallThickness, {
+  isStatic: true,
+  render: { visible: false }
+});
+
+
+// Optional: Top wall (to keep them from flying up forever)
+const wallTop = Bodies.rectangle(canvas.width / 2, -wallThickness * 1.5, canvas.width, wallThickness, {
+  isStatic: true,
+  render: { visible: false }
+});
+
+
+
+// Add to world
+Composite.add(world, [wallLeft, wallRight, wallBottom, wallTop]);
 
     const render = Render.create({
       canvas: canvas,
@@ -99,6 +132,8 @@
     Composite.add(world, [ground, leftWall, rightWall]);
 
     const blobs = [];
+    let heldBlob = null;
+    let lastHeldPos = null;
     let portalA = null;
     let portalB = null;
     let inPortal = new WeakSet();
@@ -121,6 +156,49 @@
   btn.style.color = deathTouchActive ? 'lime' : 'grey';
 }
 
+function updateTrauma(blob) {
+  const velocity = Vector.magnitude(blob.velocity);
+
+  function updateTrauma(blob) {
+  const velocity = Vector.magnitude(blob.velocity);
+
+  if (velocity > 10) {
+    let traumaBoost = velocity * 1.2;
+
+    const airborne = !blob.personality.touching || blob.personality.touching.size === 0;
+    const fallingFast = blob.velocity.y > 5;
+
+    if (airborne && fallingFast) {
+      traumaBoost *= 2.5;
+    }
+
+    blob.personality.trauma += traumaBoost;
+
+    // 😱 Scared logic only if flying through the air
+    if (velocity > 100 && airborne) {
+  blob.personality.scared = true;
+  blob.personality.agitation = Math.max(blob.personality.agitation, 100);
+  blob.personality.scaredUntil = Date.now() + 10000;
+}
+
+  }
+
+  if (blob.personality.trauma > 1000 && !blob.personality.dead) {
+    blob.personality.dead = true;
+    blob.personality.deathTime = Date.now();
+    blob.render.fillStyle = '#777';
+  }
+}
+
+
+  if (blob.personality.trauma > 1000 && !blob.personality.dead) {
+    blob.personality.dead = true;
+    blob.personality.deathTime = Date.now();
+    blob.render.fillStyle = '#777'; // normal dead color
+  }
+}
+
+
 
 
     function getRandomColor() {
@@ -132,26 +210,31 @@
       const radius = 10 + Math.random() * 20;
       const blob = Bodies.circle(
         Math.random() * canvas.width,
-        canvas.height - 100,
+        Math.random() * (canvas.height / 2)
+,
         radius,
         {
           restitution: 0.2,
-          friction: 0.9,
-          frictionStatic: 0.9,
-          frictionAir: 0.02,
+          friction: 0.1,
+          frictionStatic: 0.1,
+          frictionAir: 0.005,
           render: {
             fillStyle: getRandomColor()
           },
           label: 'blob',
+          collisionFilter: {
+            category: 0x0001
+          }
         }
       );
+
 
       blob.personality = {
         curious: true,
         scared: false,
         agitation: 0,
         grounded: false,
-        unkillableBlobzilla: Math.random() < 0.1 // 1 in 1000 chance
+        unkillableBlobzilla: Math.random() < 0.01 // 1 in 100 chance
       };
 
 
@@ -288,6 +371,18 @@
         mask: 0x0001
       }
     });
+    Events.on(mouseConstraint, 'startdrag', function (event) {
+  const body = event.body;
+  if (body && body.label === 'blob' && body.personality && !body.personality.dead) {
+    heldBlob = body;
+
+    // Enter ragdoll mode immediately
+    body.personality.fakeDead = true;
+    Body.setInertia(body, Infinity);
+    Body.setAngularVelocity(body, 0);
+  }
+});
+
     Composite.add(world, mouseConstraint);
     render.mouse = mouse;
 
@@ -340,8 +435,8 @@
               pos.y - 10,
               newRadius,
               {
-                restitution: 0.9,
-                frictionAir: 0.02,
+                restitution: 0.2,
+                frictionAir: 0.005,
                 label: 'blob',
                 render: { fillStyle: '#44cc44' }
               }
@@ -356,7 +451,7 @@
               trauma: blob.personality.trauma * 0.25,
               dead: false,
               age: 0,
-              unkillableBlobzilla: Math.random() < 0.1 // 1 in 1000 chance on split too
+              unkillableBlobzilla: Math.random() < 0.01 // 1 in 100 chance on split too
             };
 
           
@@ -383,29 +478,49 @@
         const personality = blob.personality;
         if (!personality || personality.dead) return;
 
+        // Suppress movement logic for recently tossed blobs
+          if (personality.justTossedAt) {
+            const timeSinceToss = Date.now() - personality.justTossedAt;
+            const isAirborne = !blob.personality.touching || blob.personality.touching.size === 0;
+          
+            if (timeSinceToss < 1200 || isAirborne) {
+              return;
+            } else {
+              delete personality.justTossedAt;
+            }
+          }
+
+
         if (!personality.traumaState) {
           personality.traumaState = 'healthy';
           personality.traumaEnteredAt = now;
         }
 
         const trauma = personality.trauma || 0;
-        const traumaLevel = trauma >= 800 ? 'critical' : trauma >= 600 ? 'red' : trauma >= 400 ? 'orange' : trauma >= 200 ? 'yellow' : 'healthy';
+        const traumaLevel = trauma >= 800 ? 'critical' : trauma >= 500 ? 'red' : trauma >= 300 ? 'orange' : trauma >= 100 ? 'yellow' : 'healthy';
 
         if (traumaLevel !== personality.traumaState) {
-          const timeInState = now - (personality.traumaEnteredAt || 0);
-          const canPromote = timeInState > 5000 || trauma < 200;
-          if (canPromote) {
-            personality.traumaState = traumaLevel;
-            personality.traumaEnteredAt = now;
-          }
-        }
+  const current = personality.traumaState || 'healthy';
+  const levelOrder = ['healthy', 'yellow', 'orange', 'red', 'critical'];
+  const isUpgrade = levelOrder.indexOf(traumaLevel) > levelOrder.indexOf(current);
+
+  const timeInState = now - (personality.traumaEnteredAt || 0);
+  const canChange = isUpgrade || timeInState > 1000;
+
+  if (canChange) {
+    personality.traumaState = traumaLevel;
+    personality.traumaEnteredAt = now;
+  }
+}
+
 
         if (personality.scared) {
           const remaining = personality.scaredUntil ? personality.scaredUntil - now : 0;
           const fearFactor = Math.max(0.2, Math.min(1, remaining / 4000));
           const jitterX = (Math.random() - 0.5) * 0.02 * fearFactor;
           const jitterY = (Math.random() - 0.5) * 0.001 * fearFactor;
-          Body.applyForce(blob, blob.position, { x: jitterX, y: jitterY });
+
+
         }
 
         document.getElementById('stat-spawned').textContent = stats.spawned;
@@ -420,7 +535,8 @@
       context.save();
       blobs.forEach(blob => {
         const personality = blob.personality;
-        if (!personality || personality.dead) return;
+        if (!personality || personality.dead || personality.fakeDead) return;
+
 
         const pulse = 6 + Math.sin(now / 150 + blob.id) * 4;
         const alpha = 0.2 + (Math.sin(now / 150 + blob.id) + 1) * 0.2;
@@ -477,7 +593,8 @@
       // Step 1: determine who is scared by motion, crushed, and track overexertion
       blobs.forEach(blob => {
         const { position, personality, velocity, circleRadius } = blob;
-        if (!personality || personality.dead) return;
+        if (!personality || personality.dead || personality.fakeDead) return;
+
 
         const speed = Vector.magnitude(velocity);
 
@@ -488,7 +605,7 @@
             personality.scared = true;
             personality.trauma = (personality.trauma || 0) + speed * 0.5;
 
-            // Set fear duration to 4 seconds from now
+            // Set fear duration to 5 seconds from now
             personality.scaredUntil = Date.now() + 5000;
           }
            else {
@@ -575,7 +692,7 @@ if (blob.position.y > canvas.height - 100 && stackPressure >= 3) {
   const ghost = Bodies.circle(blob.position.x, blob.position.y, 10, {
     isSensor: true,
     isStatic: false,
-    frictionAir: 0.02,
+    frictionAir: 0,
     render: {
       fillStyle: 'rgba(255,255,255,0.5)'
     },
@@ -618,6 +735,24 @@ if (blob.position.y > canvas.height - 100 && stackPressure >= 3) {
       blobs.forEach(blob => {
         const { position, personality } = blob;
         if (!personality || personality.dead) return;
+
+          // Still process trauma even if fake-dead
+          if (personality.fakeDead) {
+            updateTrauma(blob); // <-- we'll define this
+            return;
+          }
+
+
+        // Act like dead if recently tossed
+          if (personality.fakeDeadUntil && Date.now() < personality.fakeDeadUntil) {
+            return;
+          }
+
+          // Cleanup if timer expired
+          if (personality.fakeDeadUntil && Date.now() >= personality.fakeDeadUntil) {
+            delete personality.fakeDeadUntil;
+          }
+
 
         const toMouse = Vector.sub(mouse.position, position);
         const dist = Vector.magnitude(toMouse);
@@ -716,9 +851,15 @@ if (blob.position.y > canvas.height - 100 && stackPressure >= 3) {
             }
           } else {
             if (!blob.personality?.dead) {
-              Body.applyForce(blob, blob.position, { x: 0, y: -0.05 });
-              blob.render.fillStyle = 'white';
+              heldBlob = blob;
+
+              // Fake death: suspend brain, simulate physics only
+              blob.personality.fakeDead = true;
+              Body.setInertia(blob, Infinity); // Prevent rotation fight
+              Body.setAngularVelocity(blob, 0); // Reset any spin
+
             }
+
           }
           if (deathTouchActive) {
             if (!blob.personality?.dead) {
@@ -744,6 +885,51 @@ if (blob.position.y > canvas.height - 100 && stackPressure >= 3) {
         
         });
       });
+      
+      canvas.addEventListener('mouseup', function () {
+  if (heldBlob) {
+    // Give it a slight boost based on current velocity
+    const velocityBoost = Vector.mult(heldBlob.velocity, 1.2);
+    Body.setVelocity(heldBlob, velocityBoost);
+
+    // Stun the blob for 5 seconds
+    if (heldBlob) {
+  const thisBlob = heldBlob;
+
+  // Let it behave like a dead blob for 5 seconds
+  thisBlob.personality.fakeDead = true;
+  setTimeout(() => {
+    if (thisBlob && thisBlob.personality) {
+      thisBlob.personality.fakeDead = false;
+      Body.setInertia(thisBlob, thisBlob.mass); // Restore normal behavior
+    }
+  }, 1000);
+  if (heldBlob) {
+  const flingVelocity = Vector.magnitude(heldBlob.velocity);
+
+  if (flingVelocity > 100) {
+    heldBlob.personality.scared = true;
+    heldBlob.personality.agitation = Math.max(heldBlob.personality.agitation, 100);
+    heldBlob.personality.scaredUntil = Date.now() + 7000;
+  }
+}
+
+  heldBlob = null;
+}
+    lastHeldPos = null;
+  }
+});
+
+
+canvas.addEventListener('mousemove', function (e) {
+  if (heldBlob) {
+    lastHeldPos = { x: e.clientX, y: e.clientY };
+  }
+});
+
+
+
+
     
       canvas.addEventListener('touchstart', function(e) {
   const touch = e.touches[0];
@@ -774,7 +960,14 @@ if (blob.position.y > canvas.height - 100 && stackPressure >= 3) {
       }
     } else {
       if (!blob.personality?.dead) {
-        Body.applyForce(blob, blob.position, { x: 0, y: -0.05 });
+        const flingVector = Vector.normalise(Vector.sub(blob.position, mousePos));
+          Body.applyForce(blob, blob.position, {
+            x: flingVector.x * 0.03,
+            y: flingVector.y * 0.03
+          });
+          Body.setAngularVelocity(blob, (Math.random() - 0.5) * 0.4);
+          blob.personality.justTossedAt = Date.now();
+
         blob.render.fillStyle = 'white';
       }
     }
@@ -782,6 +975,22 @@ if (blob.position.y > canvas.height - 100 && stackPressure >= 3) {
 
   e.preventDefault(); // stop double-tap zoom and scrolling
 }, { passive: false });
+
+canvas.addEventListener('touchend', function () {
+  if (heldBlob) {
+    heldBlob.personality.fakeDeadUntil = Date.now() + 5000;
+    heldBlob = null;
+  }
+});
+
+      canvas.addEventListener('touchmove', function (e) {
+        if (heldBlob) {
+          const pos = { x: e.clientX, y: e.clientY };
+          lastHeldPos = pos;
+        }
+      });
+
+
 
     window.addEventListener('keydown', (e) => {
       if (!selectedPortal) return;
