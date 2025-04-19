@@ -223,13 +223,19 @@
           const s = p.unkillableBlobzilla ? 1 + Math.min(0.0025, 20 / blob.circleRadius) : 1.01;
           Body.scale(blob, s, s);
           blob.circleRadius *= s;
+        // Die of old age when reaching massive size
+        const MAX_RADIUS = 120;
+        if (blob.circleRadius >= MAX_RADIUS && !p.unkillableBlobzilla) {
+          markDead(blob);
+          continue;
+        }
         }
 
         // Split
         if (blob.circleRadius >= 60 && p.age > 7200 + p.ageOffset && !p.unkillableBlobzilla) {
           const parentR = blob.circleRadius, pos = blob.position, count = Math.random() < 0.4 ? 1 : 2;
           for (let j = 0; j < count; j++) {
-            const r = Math.max(8, parentR * 0.4 * (0.8 + Math.random()*0.4));
+            const r = Math.max(6, parentR * (0.25 + Math.random() * 0.15)); // babies are 25‑40% of parent
             const child = Bodies.circle(pos.x + (Math.random() - 0.5)*20, pos.y - 10, r, {
               restitution: 0.2,
               frictionAir: 0.005,
