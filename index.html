@@ -58,7 +58,13 @@
     <button onclick="toggleDeathTouch()" id="deathToggle">Death Touch: Off</button>
 
 
-    <p>Click a portal, then press Q/E to rotate</p>
+    <div id="scoreboard" style="font-family: monospace; font-size: 18px;">
+      <p>Spawned: <span id="stat-spawned">0</span></p>
+      <p>Born: <span id="stat-split">0</span></p>
+      <p>Blobzillas: <span id="stat-zilla">0</span></p>
+      <p>Dead: <span id="stat-dead">0</span></p>
+    </div>
+    
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/matter-js@0.19.0/build/matter.min.js"></script>
@@ -100,6 +106,14 @@
     let portalGunActive = false;
     let deathTouchActive = false;
 
+    let stats = {
+      spawned: 0,
+      split: 0,
+      zilla: 0,
+      dead: 0
+    };
+
+
     function toggleDeathTouch() {
   deathTouchActive = !deathTouchActive;
   const btn = document.getElementById('deathToggle');
@@ -136,11 +150,20 @@
         curious: true,
         scared: false,
         agitation: 0,
-        grounded: false
+        grounded: false,
+        unkillableBlobzilla: Math.random() < 0.1 // 1 in 1000 chance
       };
+
 
       blobs.push(blob);
       Composite.add(world, blob);
+      stats.spawned++;
+
+        if (blob.personality.unkillableBlobzilla) {
+          stats.zilla++;
+          document.getElementById('stat-zilla').textContent = stats.zilla;
+        }
+
     }
 
     function clearBlobs() {
@@ -282,18 +305,27 @@
         const growthInterval = 120;
 
         // grow over time
-        if (blob.circleRadius < 60 && personality.age % growthInterval === 0) {
-          const scale = 1.01;
-          Body.scale(blob, scale, scale);
-          blob.circleRadius *= scale;
-        }
+        if ((blob.circleRadius < 60 || personality.unkillableBlobzilla) && personality.age % growthInterval === 0) {
+            const scale = personality.unkillableBlobzilla
+              ? 1 + Math.min(0.0025, 20 / blob.circleRadius) // scale down growth as it gets huge
+              : 1.01;
+                  
+            Body.scale(blob, scale, scale);
+            blob.circleRadius *= scale;
+          }
+
 
         // set fill color based on age/size (light green when small, darker green when grown)
         const greenIntensity = Math.max(100, 255 - Math.floor(blob.circleRadius * 2.5));
         blob.render.fillStyle = `rgb(100, ${greenIntensity}, 120)`;
 
         // split if big and old enough
-        if (blob.circleRadius >= 60 && personality.age > 7200 + personality.ageOffset) {
+        if (
+            blob.circleRadius >= 60 &&
+            personality.age > 7200 + personality.ageOffset &&
+            !personality.unkillableBlobzilla
+          ) {
+
           const pos = blob.position;
           const numChildren = Math.random() < 0.4 ? 1 : 2;
           const parentRadius = blob.circleRadius;
@@ -323,11 +355,19 @@
               agitation: 0,
               trauma: blob.personality.trauma * 0.25,
               dead: false,
-              age: 0
+              age: 0,
+              unkillableBlobzilla: Math.random() < 0.1 // 1 in 1000 chance on split too
             };
+
           
             Composite.add(world, baby);
             blobs.push(baby);
+            stats.split++;
+
+            if (baby.personality.unkillableBlobzilla) {
+              stats.zilla++;
+            }
+
           }
 
 
@@ -361,10 +401,18 @@
         }
 
         if (personality.scared) {
-          const jitterX = (Math.random() - 0.5) * 0.02;
-          const jitterY = (Math.random() - 0.5) * 0.001;
+          const remaining = personality.scaredUntil ? personality.scaredUntil - now : 0;
+          const fearFactor = Math.max(0.2, Math.min(1, remaining / 4000));
+          const jitterX = (Math.random() - 0.5) * 0.02 * fearFactor;
+          const jitterY = (Math.random() - 0.5) * 0.001 * fearFactor;
           Body.applyForce(blob, blob.position, { x: jitterX, y: jitterY });
         }
+
+        document.getElementById('stat-spawned').textContent = stats.spawned;
+        document.getElementById('stat-split').textContent = stats.split;
+        
+        
+
       });
 
       // Step 0.65: draw colored heart pulse aura based on trauma level
@@ -434,15 +482,28 @@
         const speed = Vector.magnitude(velocity);
 
         // If the blob is flung too hard, increase damage
-        if (speed > 10) {
-          personality.agitation = 80;
-          personality.scared = true;
-          personality.trauma = (personality.trauma || 0) + speed * 0.25;
-        } else {
-          personality.agitation = Math.max(0, personality.agitation - 0.2);
-          if (personality.agitation < 5) personality.scared = false;
-          personality.trauma = Math.max(0, (personality.trauma || 0) - 0.3);
-        }
+        // Change this block in the 'beforeUpdate' loop:
+        if (speed > 25) {
+            personality.agitation = 100;
+            personality.scared = true;
+            personality.trauma = (personality.trauma || 0) + speed * 0.5;
+
+            // Set fear duration to 4 seconds from now
+            personality.scaredUntil = Date.now() + 5000;
+          }
+           else {
+            personality.agitation = Math.max(0, personality.agitation - 0.4);
+              personality.trauma = Math.max(0, (personality.trauma || 0) - 0.6);
+
+              if (
+                personality.agitation < 10 &&
+                (!personality.scaredUntil || Date.now() > personality.scaredUntil)
+              ) {
+                personality.scared = false;
+              }
+
+          }
+
 
         const trauma = personality.trauma || 0;
 
@@ -501,31 +562,46 @@ if (blob.position.y > canvas.height - 100 && stackPressure >= 3) {
       for (let i = blobs.length - 1; i >= 0; i--) {
         const blob = blobs[i];
         if (blob.personality?.dead && now - blob.personality.deathTime > 4000) {
-          // spawn ghost
-          const ghost = Bodies.circle(blob.position.x, blob.position.y, 10, {
-            isSensor: true,
-            isStatic: false,
-            frictionAir: 0.02,
-            render: {
-              fillStyle: 'rgba(255,255,255,0.5)'
-            },
-            label: 'ghost'
-          });
-          Body.setVelocity(ghost, { x: 0, y: -2 });
-          Composite.add(world, ghost);
+  if (!blob.personality.countedAsDead) {
+    stats.dead++;
+    blob.personality.countedAsDead = true;
 
-          setTimeout(() => {
-            Composite.remove(world, ghost);
-          }, 2000);
+    if (blob.personality.unkillableBlobzilla) {
+      stats.zilla = Math.max(0, stats.zilla - 1);
+    }
+  }
 
-          Composite.remove(world, blob);
-          blobs.splice(i, 1);
-        }
+  // spawn ghost and remove blob
+  const ghost = Bodies.circle(blob.position.x, blob.position.y, 10, {
+    isSensor: true,
+    isStatic: false,
+    frictionAir: 0.02,
+    render: {
+      fillStyle: 'rgba(255,255,255,0.5)'
+    },
+    label: 'ghost'
+  });
+  Body.setVelocity(ghost, { x: 0, y: -2 });
+  Composite.add(world, ghost);
+
+  setTimeout(() => {
+    Composite.remove(world, ghost);
+  }, 2000);
+
+  Composite.remove(world, blob);
+  blobs.splice(i, 1);
+  document.getElementById('stat-dead').textContent = stats.dead;
+  document.getElementById('stat-zilla').textContent = stats.zilla;
+
+}
+
       }
 
       // Step 2: spread fear to nearby blobs
       blobs.forEach(blob => {
-        if (!blob.personality || !blob.personality.scared || blob.personality.dead) return;
+        if (!blob.personality || blob.personality.dead) return;
+          // Only spread if they're *very* scared
+          if (!blob.personality.scared || blob.personality.agitation < 80) return;
 
         blobs.forEach(other => {
           if (other === blob || !other.personality || other.personality.dead) return;
@@ -658,8 +734,10 @@ if (blob.position.y > canvas.height - 100 && stackPressure >= 3) {
                 ) {
                   other.personality.scared = true;
                   other.personality.agitation = Math.max(other.personality.agitation, 100);
+                  other.personality.scaredUntil = Date.now() + 10000; // scared longer from death
                 }
               });
+
             }
           }
           
