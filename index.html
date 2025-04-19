@@ -1,9 +1,10 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Blobverse — The Micro‑Multiverse</title>
+  <title>Blobverse — The Micro‑Multiverse</title>
   <style>
     html,body{margin:0;padding:0;overflow:hidden;background:#000;color:#fff;font-family:"Segoe UI",sans-serif}
     canvas{display:block}
@@ -16,13 +17,13 @@
 <body>
   <canvas id="world"></canvas>
   <div id="ui">
-    <button onclick="spawnBlob()">Spawn Blob</button>
-    <button onclick="clearBlobs()">Wipe out Blobs</button>
-    <button onclick="togglePortalGun()" id="portalToggle">Portal Gun: Off</button>
-    <button onclick="clearPortals()">Clear Portals</button>
-    <button onclick="rotateSelectedPortal('left')">⟲ Rotate Left</button>
-    <button onclick="rotateSelectedPortal('right')">⟳ Rotate Right</button>
-    <button onclick="toggleDeathTouch()" id="deathToggle">Death Touch: Off</button>
+    <button onclick="spawnBlob()">Spawn Blob</button>
+    <button onclick="clearBlobs()">Wipe out Blobs</button>
+    <button onclick="togglePortalGun()" id="portalToggle">Portal Gun: Off</button>
+    <button onclick="clearPortals()">Clear Portals</button>
+    <button onclick="rotateSelectedPortal('left')">⟲ Rotate Left</button>
+    <button onclick="rotateSelectedPortal('right')">⟳ Rotate Right</button>
+    <button onclick="toggleDeathTouch()" id="deathToggle">Death Touch: Off</button>
     <button onclick="window.location.href='dev.html'">Dev</button>
     <div id="scoreboard">
       <p>Spawned: <span id="stat-spawned">0</span></p>
@@ -70,6 +71,7 @@
     const inPortal = new WeakSet();
     let heldBlob = null;
     let selectedPortal = null;
+    let draggingPortal = null;
     let portalA = null;
     let portalB = null;
     let portalGunActive = false;
@@ -350,6 +352,30 @@
         }
       }
     });
+
+    // ----- Portal dragging -----
+    const startPortalDrag = pos => {
+      draggingPortal = [portalA, portalB].find(p => p && Matter.Bounds.contains(p.bounds, pos));
+    };
+    canvas.addEventListener('mousedown', () => startPortalDrag(mouse.position));
+    canvas.addEventListener('touchstart', e => {
+      const t = e.touches[0];
+      startPortalDrag({ x: t.clientX, y: t.clientY });
+    }, { passive: false });
+
+    canvas.addEventListener('mousemove', e => {
+      if (draggingPortal) Body.setPosition(draggingPortal, { x: e.clientX, y: e.clientY });
+    });
+    canvas.addEventListener('touchmove', e => {
+      if (draggingPortal) {
+        const t = e.touches[0];
+        Body.setPosition(draggingPortal, { x: t.clientX, y: t.clientY });
+      }
+    }, { passive: false });
+    const stopDrag = () => { draggingPortal = null; };
+    canvas.addEventListener('mouseup', stopDrag);
+    canvas.addEventListener('touchend', stopDrag);
+    canvas.addEventListener('touchcancel', stopDrag);
 
     /* Responsive */
     addEventListener('resize', () => {
