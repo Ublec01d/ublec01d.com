@@ -27,9 +27,8 @@
       <p>Spawned: <span id="stat-spawned">0</span></p>
       <p>Born: <span id="stat-split">0</span></p>
       <p>Dead: <span id="stat-dead">0</span></p>
-      <p>Alive: <span id="stat-alive">0</span></p>
       <p>Blobzillas: <span id="stat-zilla">0</span></p>
-      
+      <p>Alive: <span id="stat-alive">0</span></p>
     </div>
   </div>
 
@@ -141,7 +140,6 @@
       updateHUD();
       // allow body to keep falling; no static freeze
     }
-
     function clearBlobs() {
       [...blobs].forEach((b, i) => setTimeout(() => { markDead(b); spreadFear(b, 10000); b.personality.trauma = 2000; }, i*120));
     }
@@ -237,27 +235,22 @@
           const s = p.unkillableBlobzilla ? 1 + Math.min(0.0025, 20 / blob.circleRadius) : 1.01;
           Body.scale(blob, s, s);
           blob.circleRadius *= s;
-        // Die of old age when reaching massive size
-        const MAX_RADIUS = 120;
-        if (blob.circleRadius >= MAX_RADIUS && !p.unkillableBlobzilla) {
-          markDead(blob);
-          continue;
         }
-        }
-
-        // Split
+        // Split if large and old enough
         if (blob.circleRadius >= 60 && p.age > 7200 + p.ageOffset && !p.unkillableBlobzilla) {
-          const parentR = blob.circleRadius, pos = blob.position, count = Math.random() < 0.4 ? 1 : 2;
+          const parentR = blob.circleRadius;
+          const pos = blob.position;
+          const count = Math.random() < 0.4 ? 1 : 2;
           for (let j = 0; j < count; j++) {
-            const r = Math.max(6, parentR * (0.25 + Math.random() * 0.15)); // babies are 25‑40% of parent
-            const child = Bodies.circle(pos.x + (Math.random() - 0.5)*20, pos.y - 10, r, {
+            const r = Math.max(6, parentR * (0.25 + Math.random() * 0.15)); // 25‑40% size
+            const baby = Bodies.circle(pos.x + (Math.random() - 0.5) * 20, pos.y - 10, r, {
               restitution: 0.2,
               frictionAir: 0.005,
               label: 'blob',
               render: { fillStyle: greenTint(r) }
             });
-            child.circleRadius = r;
-            child.personality = {
+            baby.circleRadius = r;
+            baby.personality = {
               age: 0,
               ageOffset: Math.floor(Math.random()*600),
               scared: false,
@@ -267,12 +260,25 @@
               unkillableBlobzilla: Math.random() < 0.01,
               touching: new Set()
             };
-            blobs.push(child);
-            Composite.add(world, child);
+            blobs.push(baby);
+            Composite.add(world, baby);
             stats.split++;
-            if (child.personality.unkillableBlobzilla) stats.zilla++;
+            if (baby.personality.unkillableBlobzilla) stats.zilla++;
           }
+          // parent dies and spawns ghost
           markDead(blob);
+          ghosts.push({ x: blob.position.x, y: blob.position.y, start: now });
+          Composite.remove(world, blob);
+          blobs.splice(i, 1);
+          continue;
+        }
+
+        // Die of old age when reaching massive size
+        const MAX_RADIUS = 120;
+        if (blob.circleRadius >= MAX_RADIUS && !p.unkillableBlobzilla) {
+          markDead(blob);
+          // spawn ghost immediately for parent death
+          ghosts.push({ x: blob.position.x, y: blob.position.y, start: now });
           Composite.remove(world, blob);
           blobs.splice(i, 1);
           continue;
