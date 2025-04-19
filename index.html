@@ -24,10 +24,11 @@
     <button onclick="rotateSelectedPortal('right')">⟳ Rotate Right</button>
     <button onclick="toggleDeathTouch()" id="deathToggle">Death Touch: Off</button>
     <div id="scoreboard">
-      <p>Spawned: <span id="stat-spawned">0</span></p>
-      <p>Born: <span id="stat-split">0</span></p>
-      <p>Blobzillas: <span id="stat-zilla">0</span></p>
-      <p>Dead: <span id="stat-dead">0</span></p>
+      <p>Spawned: <span id="stat-spawned">0</span></p>
+      <p>Born: <span id="stat-split">0</span></p>
+      <p>Dead: <span id="stat-dead">0</span></p>
+      <p>Alive: <span id="stat-alive">0</span></p>
+      <p>Blobzillas: <span id="stat-zilla">0</span></p>
     </div>
   </div>
 
@@ -74,7 +75,16 @@
     let deathTouchActive = false;
 
     const stats = { spawned: 0, split: 0, zilla: 0, dead: 0 };
-    const updateHUD = () => { for (const k in stats) document.getElementById(`stat-${k}`).textContent = stats[k]; };
+    const updateHUD = () => {
+      for (const k in stats) {
+        const el = document.getElementById(`stat-${k}`);
+        if (el) el.textContent = stats[k];
+      }
+      // alive = blobs that are not dead
+      const aliveCount = blobs.filter(b => !b.personality.dead).length;
+      const aliveEl = document.getElementById('stat-alive');
+      if (aliveEl) aliveEl.textContent = aliveCount;
+    };
 
     /* Color helpers */
     const greenTint = r => {
@@ -108,7 +118,7 @@
         agitation: 0,
         trauma: 0,
         fakeDead: false,
-        unkillableBlobzilla: Math.random() < 0.01,
+        unkillableBlobzilla: Math.random() < 0.01, /*Spawn rate of blobzilla's 0.01 = 1 in 100*/
         touching: new Set()
       };
       blobs.push(blob);
@@ -120,6 +130,10 @@
 
     function markDead(blob) {
       if (blob.personality.dead) return;
+      // decrement Blobzilla counter if needed
+      if (blob.personality.unkillableBlobzilla) {
+        stats.zilla = Math.max(0, stats.zilla - 1);
+      }
       blob.personality.dead = true;
       blob.personality.deathTime = Date.now();
       blob.render.fillStyle = '#666';
@@ -284,11 +298,29 @@
         const dist = Vector.magnitude(toMouse);
         const dir = Vector.normalise(toMouse);
         if (touching) {
-          if (Math.random() < 0.02) Body.applyForce(blob, blob.position, { x: (Math.random() - 0.5)*0.01, y: -0.035 });
-          if (dist < 400 && Math.random() < 0.25) {
-            const jump = -0.045, base = 0.02;
+          // Older/bigger blobs hop higher but less often
+          const sizeFactor = Math.min(blob.circleRadius / 40, 3); // 0‑3 range
+
+          // Idle bunny hop
+          const idleChance = 0.02 / (1 + sizeFactor);            // less frequent when older
+          const idleJump   = -0.035 * (1 + 0.6 * sizeFactor);    // higher when older
+          if (Math.random() < idleChance) {
+            Body.applyForce(blob, blob.position, {
+              x: (Math.random() - 0.5) * 0.01,
+              y: idleJump
+            });
+          }
+
+          // Mouse‑directed hop (chase / flee)
+          const chaseChance = 0.25 / (1 + sizeFactor);           // rarer for elders
+          if (dist < 400 && Math.random() < chaseChance) {
+            const baseJump  = -0.045 * (1 + 0.8 * sizeFactor);
+            const baseSpeed = 0.02 * (1 + 0.4 * sizeFactor);
             const flee = p.scared;
-            Body.applyForce(blob, blob.position, { x: (flee ? -dir.x : dir.x) * (flee ? base*2.5 : base), y: flee ? jump*1.2 : jump });
+            Body.applyForce(blob, blob.position, {
+              x: (flee ? -dir.x : dir.x) * (flee ? baseSpeed * 2.5 : baseSpeed),
+              y: flee ? baseJump * 1.2 : baseJump
+            });
           }
         }
 
