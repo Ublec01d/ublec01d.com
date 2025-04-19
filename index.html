@@ -465,6 +465,9 @@ function updateTrauma(blob) {
 
           }
 
+          stats.dead++;
+            document.getElementById('stat-dead').textContent = stats.dead;
+
 
 
           Composite.remove(world, blob);
