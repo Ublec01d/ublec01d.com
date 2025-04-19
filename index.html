@@ -148,6 +148,29 @@ Composite.add(world, [wallLeft, wallRight, wallBottom, wallTop]);
       dead: 0
     };
 
+    function markBlobAsDead(blob) {
+      if (!blob || !blob.personality || blob.personality.dead) return;
+      blob.personality.dead = true;
+      blob.personality.deathTime = Date.now();
+      blob.personality.scared = false;
+      blob.personality.agitation = 0;
+      blob.personality.isChasing = false;
+      blob.personality.touching = new Set();
+      blob.render.fillStyle = '#777';
+      blob.render.sprite = {}; // Remove wobble
+      blob.restitution = 0;
+      blob.frictionAir = 0.1;
+    }
+
+    window.addEventListener('mousedown', function (e) {
+      const mousePos = { x: e.clientX, y: e.clientY };
+      const clickedBlobs = Query.point(blobs, mousePos);
+      clickedBlobs.forEach(blob => {
+        if (deathTouchActive && !blob.personality?.dead) {
+          markBlobAsDead(blob);
+        }
+      });
+    });
 
     function toggleDeathTouch() {
   deathTouchActive = !deathTouchActive;
@@ -184,17 +207,15 @@ function updateTrauma(blob) {
   }
 
   if (blob.personality.trauma > 1000 && !blob.personality.dead) {
-    blob.personality.dead = true;
-    blob.personality.deathTime = Date.now();
-    blob.render.fillStyle = '#777';
+    markBlobAsDead(blob);
+
   }
 }
 
 
   if (blob.personality.trauma > 1000 && !blob.personality.dead) {
-    blob.personality.dead = true;
-    blob.personality.deathTime = Date.now();
-    blob.render.fillStyle = '#777'; // normal dead color
+    markBlobAsDead(blob);
+
   }
 }
 
