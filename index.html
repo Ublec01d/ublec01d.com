@@ -29,6 +29,7 @@
       <p>Dead: <span id="stat-dead">0</span></p>
       <p>Alive: <span id="stat-alive">0</span></p>
       <p>Blobzillas: <span id="stat-zilla">0</span></p>
+      
     </div>
   </div>
 
@@ -118,7 +119,7 @@
         agitation: 0,
         trauma: 0,
         fakeDead: false,
-        unkillableBlobzilla: Math.random() < 0.01, /*Spawn rate of blobzilla's 0.01 = 1 in 100*/
+        unkillableBlobzilla: Math.random() < 0.01,
         touching: new Set()
       };
       blobs.push(blob);
@@ -130,7 +131,6 @@
 
     function markDead(blob) {
       if (blob.personality.dead) return;
-      // decrement Blobzilla counter if needed
       if (blob.personality.unkillableBlobzilla) {
         stats.zilla = Math.max(0, stats.zilla - 1);
       }
@@ -139,7 +139,7 @@
       blob.render.fillStyle = '#666';
       stats.dead++;
       updateHUD();
-      setTimeout(() => Body.setStatic(blob, true), 1000);
+      // allow body to keep falling; no static freeze
     }
 
     function clearBlobs() {
