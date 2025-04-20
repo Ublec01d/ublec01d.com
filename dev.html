@@ -119,6 +119,28 @@
     let portalGunActive = false;
     let deathTouchActive = false;
 
+
+    // wake lock to keep screen awake and prevent throttling
+    let wakeLock = null;
+
+async function requestWakeLock() {
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    console.log('Wake lock active');
+  } catch (err) {
+    console.error(`${err.name}, ${err.message}`);
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (wakeLock !== null && document.visibilityState === 'visible') {
+    requestWakeLock();
+  }
+});
+
+requestWakeLock();
+// until here for the wakelock section
+
     const stats = { spawned: 0, split: 0, zilla: 0, dead: 0 };
     const statsEvil = { spawned: 0, split: 0, dead: 0 };
     const updateHUD = () => {
