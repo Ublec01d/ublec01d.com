@@ -105,7 +105,7 @@
     });
 
     /* Blob factory */
-    function spawnBlob(x = Math.random()*canvas.width, y = Math.random()*canvas.height/2, r = 10 + Math.random()*20) {
+    function spawnBlob(x = Math.random()*canvas.width, y = Math.random()*canvas.height/2, r = 10 + Math.random()*8) {
       const blob = Bodies.circle(x, y, r, {
         restitution: 0.2,
         frictionAir: 0.005,
@@ -234,18 +234,18 @@
 
         // Age & growth
         p.age++;
-        if ((blob.circleRadius < 60 || p.unkillableBlobzilla) && p.age % 120 === 0) {
+        if ((blob.circleRadius < 35 || p.unkillableBlobzilla) && p.age % 120 === 0) {                   // CircleRadius = max growth size
           const s = p.unkillableBlobzilla ? 1 + Math.min(0.0025, 20 / blob.circleRadius) : 1.01;
           Body.scale(blob, s, s);
           blob.circleRadius *= s;
         }
         // Split if large and old enough
-        if (blob.circleRadius >= 60 && p.age > 7200 + p.ageOffset && !p.unkillableBlobzilla) {
+        if (blob.circleRadius >= 30 && p.age > 7200 + p.ageOffset && !p.unkillableBlobzilla) {          // CircleRadius = growth size before splitting
           const parentR = blob.circleRadius;
           const pos = blob.position;
           const count = Math.random() < 0.4 ? 1 : 2;
           for (let j = 0; j < count; j++) {
-            const r = Math.max(6, parentR * (0.25 + Math.random() * 0.15)); // 25‑40% size
+            const r = Math.max(6, parentR * (0.25 + Math.random() * 0.15));                             // 25‑40% size of parent
             const baby = Bodies.circle(pos.x + (Math.random() - 0.5) * 20, pos.y - 10, r, {
               restitution: 0.2,
               frictionAir: 0.005,
@@ -260,7 +260,7 @@
               agitation: 0,
               trauma: p.trauma * 0.25,
               fakeDead: false,
-              unkillableBlobzilla: Math.random() < 0.01,
+              unkillableBlobzilla: Math.random() < 0.01,                                                // Split chance of becoming zilla (0.01 = 1 in 100)
               touching: new Set()
             };
             blobs.push(baby);
@@ -311,8 +311,8 @@
           const sizeFactor = Math.min(blob.circleRadius / 40, 3); // 0‑3 range
 
           // Idle bunny hop
-          const idleChance = 0.02 / (1 + sizeFactor);            // less frequent when older
-          const idleJump   = -0.035 * (1 + 0.6 * sizeFactor);    // higher when older
+          const idleChance = 0.03 / (1 + sizeFactor);            // less frequent when older
+          const idleJump   = -0.015 * (1 + 0.6 * sizeFactor);    // higher when older
           if (Math.random() < idleChance) {
             Body.applyForce(blob, blob.position, {
               x: (Math.random() - 0.5) * 0.01,
@@ -321,9 +321,9 @@
           }
 
           // Mouse‑directed hop (chase / flee)
-          const chaseChance = 0.25 / (1 + sizeFactor);           // rarer for elders
-          if (dist < 400 && Math.random() < chaseChance) {
-            const baseJump  = -0.045 * (1 + 0.8 * sizeFactor);
+          const chaseChance = 0.05 / (1 + sizeFactor);           // rarer for elders
+          if (dist < 600 && Math.random() < chaseChance) {      // responsive distance from cursor 
+            const baseJump  = -0.02 * (1 + 0.8 * sizeFactor);
             const baseSpeed = 0.02 * (1 + 0.4 * sizeFactor);
             const flee = p.scared;
             Body.applyForce(blob, blob.position, {
