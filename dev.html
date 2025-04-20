@@ -120,7 +120,7 @@
     let deathTouchActive = false;
 
 
-    // wake lock to keep screen awake and prevent throttling
+    // wake lock to keep screen awake
     let wakeLock = null;
 
 async function requestWakeLock() {
@@ -140,6 +140,13 @@ document.addEventListener('visibilitychange', () => {
 
 requestWakeLock();
 // until here for the wakelock section
+
+    // iOS Safari and mobile browser workaround to prevent FPS throttling
+window.addEventListener('touchstart', () => {}, { passive: true });
+window.addEventListener('touchmove', () => {}, { passive: true });
+
+
+    
 
     const stats = { spawned: 0, split: 0, zilla: 0, dead: 0 };
     const statsEvil = { spawned: 0, split: 0, dead: 0 };
