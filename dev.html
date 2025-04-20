@@ -427,18 +427,18 @@
 
         // Age & growth
         p.age++;
-        if ((blob.circleRadius < 60 || p.unkillableBlobzilla) && p.age % 120 === 0) {
+        if ((blob.circleRadius < 35 || p.unkillableBlobzilla) && p.age % 120 === 0) {                // CircleRadius = max growth size
           const s = p.unkillableBlobzilla ? 1 + Math.min(0.0025, 20 / blob.circleRadius) : 1.01;
           Body.scale(blob, s, s);
           blob.circleRadius *= s;
         }
         // Split if large and old enough
-        if (blob.circleRadius >= 60 && p.age > 7200 + p.ageOffset && !p.unkillableBlobzilla) {
+        if (blob.circleRadius >= 30 && p.age > 7200 + p.ageOffset && !p.unkillableBlobzilla) {      // CircleRadius = growth size before splitting
           const parentR = blob.circleRadius;
           const pos = blob.position;
           const count = Math.random() < 0.4 ? 1 : 2;
           for (let j = 0; j < count; j++) {
-            const r = Math.max(6, parentR * (0.25 + Math.random() * 0.15)); // 25‑40% size
+            const r = Math.max(6, parentR * (0.25 + Math.random() * 0.15));                         // 25‑40% size
             const isEvil = p.evil;
             const babyColor = isEvil ? redTint(r) : greenTint(r);
             const baby = Bodies.circle(pos.x + (Math.random() - 0.5) * 20, pos.y - 10, r, {
@@ -455,7 +455,7 @@
               agitation: 0,
               trauma: p.trauma * 0.25,
               fakeDead: false,
-              unkillableBlobzilla: Math.random() < 0.01,
+              unkillableBlobzilla: Math.random() < 0.001,                                        // Split chance of becoming zilla (0.01 = 1 in 100)
               touching: new Set(),
               evil: isEvil,
               hp: r * 2,
