@@ -68,6 +68,7 @@
 
     /* Engine & Renderer */
     const engine = Engine.create();
+    engine.enableSleeping = false;
     const world  = engine.world;
     world.gravity.y = 1;
 
@@ -121,11 +122,40 @@
     }
     const rand=(min,max)=>min+Math.random()*(max-min);
     const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
+
+    function nextSleepDelayForBlob(blobOrRadius=16, initial=false){
+      const r = typeof blobOrRadius === 'number' ? blobOrRadius : (blobOrRadius.circleRadius || 16);
+
+      // Sleep should be uncommon when healthy, but sleep-deprived blobs should
+      // try to sleep much sooner. Still not instant, so waking them up matters.
+      const ageBias = typeof blobOrRadius === 'number' ? 0 : clamp((blobOrRadius.personality?.age || 0)/26000,0,1);
+      const sizeBias = clamp((r-16)/34,0,1);
+      const debtBias = typeof blobOrRadius === 'number' ? 0 : clamp((blobOrRadius.personality?.sleepDebt || 0)/120,0,1);
+      const energyBias = typeof blobOrRadius === 'number' ? 0 : clamp((0.38-(blobOrRadius.personality?.energy ?? 1))/0.38,0,1);
+      const sleepiness = clamp((ageBias*0.22 + sizeBias*0.28 + debtBias*0.34 + energyBias*0.16),0,1);
+
+      const healthyMin = initial ? 35000 : 45000;
+      const healthyMax = initial ? 180000 : 240000;
+
+      // Severe sleep debt can pull the next attempt down to roughly 8-25 seconds.
+      const minDelay = Math.max(8000, healthyMin - debtBias*28000 - energyBias*9000);
+      const maxDelay = Math.max(minDelay+1000, healthyMax - sleepiness*185000);
+
+      return rand(minDelay, maxDelay);
+    }
+    function scheduleNextSleep(blob, now=Date.now(), forceCooldown=false, initial=false){
+      const p=blob.personality;
+      if(!p) return;
+      const cooldown = forceCooldown ? 120000 : 0; // guaranteed 2 minutes after sleeping well
+      p.nextSleepEligibleAt = now + cooldown + nextSleepDelayForBlob(blob, initial);
+      p.restCooldownUntil = p.nextSleepEligibleAt;
+    }
+
     function makePersonality(extra={}){
       return {
         age:0,ageOffset:Math.floor(Math.random()*600),scared:false,agitation:0,trauma:0,
         fakeDead:false,dead:false,infected:false,infectious:false,infection:0,infectionStage:'healthy',infectionPulse:0,sterile:false,
-        crushed:0,hunger:rand(0,1),mood:rand(0,1),blinkUntil:0,nextBlink:Date.now()+rand(1200,6000),
+        crushed:0,hunger:rand(0,1),mood:rand(0,1),energy:rand(0.72,1),tired:false,sleepDebt:0,sleepInterrupted:0,forcedSleeps:0,emergencySleep:false,splitFaceUntil:0,blinkUntil:0,nextBlink:Date.now()+rand(1200,6000),
         temperament:Math.random()<0.22?'timid':(Math.random()<0.48?'joyful':'balanced'),
         fearfulness:rand(0.6,1.4),cheerfulness:rand(0.35,1),bravery:rand(0.55,1.35),
         heldEmotion:'neutral',heldSince:0,wasThrownAt:0,lastReleaseSpeed:0,
@@ -136,9 +166,9 @@
         socialStyle:Math.random()<0.24?'loner':(Math.random()<0.54?'social':'neutral'),
         personalSpace:rand(42,92),crowdStress:0,quietTarget:null,quietUntil:0,grudgeId:null,grudgeUntil:0,
         exploreCooldownUntil:0,lastInterestingKind:null,exploreTargetKind:null,exploreTargetId:null,exploreTargetUntil:0,
-        exploreBoredUntil:0,stuckTimer:0,lastExploreX:null,
+        exploreBoredUntil:0,stuckTimer:0,blockedOnTargetSince:0,lastExploreX:null,lastExploreY:null,avoidExploreId:null,avoidExploreKind:null,avoidExploreUntil:0,beamHangoutUntil:0,beamLeaveUntil:0,
         portalSpin:0,portalAvoidUntil:0,portalTrips:0,
-        restMode:null,restTargetX:null,restUntil:0,restCooldownUntil:Date.now()+rand(5000,16000),restStartedAt:0,
+        restMode:null,restTargetX:null,restUntil:0,restCooldownUntil:Date.now()+rand(35000,180000),nextSleepEligibleAt:Date.now()+rand(35000,180000),restStartedAt:0,awakeUntil:0,nextSleepParticle:0,sleepWellAt:0,
         unkillableBlobzilla:Math.random()<0.01,touching:new Set(),...extra
       };
     }
@@ -152,10 +182,23 @@
       const blob=Bodies.circle(x,y,r,{ restitution:0.12, friction:0.65, frictionStatic:0.9, frictionAir:0.0012, density:0.0012, label:'blob', collisionFilter:{category:0x0001}, render:{fillStyle:personality.infected?infectedTint(r):greenTint(r)} });
       blob.circleRadius=r;
       blob.personality=personality;
+      scheduleNextSleep(blob, Date.now(), false, true);
       return blob;
     }
     function addSickParticle(blob){
       particles.push({x:blob.position.x+rand(-blob.circleRadius,blob.circleRadius),y:blob.position.y+rand(-blob.circleRadius,blob.circleRadius),vx:rand(-0.25,0.25),vy:rand(-1.2,-0.2),r:rand(2,5),life:rand(500,1200),start:Date.now(),kind:'sick'});
+    }
+    function addSleepParticle(blob){
+      particles.push({
+        x:blob.position.x+rand(-blob.circleRadius*0.25,blob.circleRadius*0.55),
+        y:blob.position.y-blob.circleRadius-rand(8,18),
+        vx:rand(-0.08,0.18),
+        vy:rand(-0.45,-0.18),
+        r:Math.max(9,blob.circleRadius*0.42),
+        life:rand(1200,2100),
+        start:Date.now(),
+        kind:'sleep'
+      });
     }
     function infectBlob(blob,source=null){
       const p=blob?.personality; if(!p||p.dead||p.infected) return false;
@@ -384,7 +427,7 @@
       p.infectionStage='dead';
       p.contactVirusFrames=0;
       if(p.touching) p.touching.clear();
-      blob.render.fillStyle=cause==='virus'?'#4b1c24':cause==='crushed'?'#333':'#666';
+      blob.render.fillStyle=cause==='virus'?'#4b1c24':cause==='crushed'?'#333':cause==='sleep'?'#4c4a70':'#666';
       stats.dead++; updateHUD();
     }
     function releaseBlobVirus(){
@@ -545,6 +588,9 @@
           if(wasHealthy) triggerCursorFear(pos, 9500, b);
         }
         else if(!b.personality.dead){
+          if(b.personality.restMode==='sleeping'){
+            wakeSleepingBlob(b,'bump');
+          }
           heldBlob=b;
           b.personality.fakeDead=true;
           b.personality.heldSince=Date.now();
@@ -778,6 +824,12 @@
         blob.personality.touching.add(other.id);
         if(other.label==='blob' && other.personality) other.personality.touching.add(blob.id);
         tryContactInfection(bodyA,bodyB);
+        if(bodyA.label==='blob' && bodyB.label==='blob'){
+          const relSpeed=Vector.magnitude(Vector.sub(bodyA.velocity,bodyB.velocity));
+          const hard=relSpeed>5.2;
+          if(bodyA.personality?.restMode==='sleeping') wakeSleepingBlob(bodyA,hard?'hard-bump':'bump');
+          if(bodyB.personality?.restMode==='sleeping') wakeSleepingBlob(bodyB,hard?'hard-bump':'bump');
+        }
         if((other===portalA||other===portalB)){
           const target= other===portalA?portalB:portalA; if(!target) return;
           const normal=portalFrontNormal(other);
@@ -809,6 +861,11 @@
         // Prevent blob-on-blob contacts from acting like jump pads.
         // They still collide and push each other, but upward transfer is damped.
         if(bodyA.label==='blob' && bodyB.label==='blob'){
+          const relSpeed=Vector.magnitude(Vector.sub(bodyA.velocity,bodyB.velocity));
+          if(relSpeed>3.4){
+            if(bodyA.personality?.restMode==='sleeping') wakeSleepingBlob(bodyA,relSpeed>5.2?'hard-bump':'bump');
+            if(bodyB.personality?.restMode==='sleeping') wakeSleepingBlob(bodyB,relSpeed>5.2?'hard-bump':'bump');
+          }
           for(const b of [bodyA,bodyB]){
             if(!b.personality || b.personality.dead || b.personality.infected) continue;
             if(!hasWorldSupport(b) && b.velocity.y < -5.5){
@@ -882,45 +939,59 @@
       return best ? {blob:best,dist:bestD,dir:Vector.normalise(Vector.sub(best.position,blob.position))} : null;
     }
 
-    function pointOnBeam(beam, position){
+    function pointOnBeamForBlob(blob, beam){
       const len=beam.plugin?.w || Math.hypot(beam.vertices[1].x-beam.vertices[0].x,beam.vertices[1].y-beam.vertices[0].y);
       const axis=Vector.rotate({x:1,y:0},beam.angle);
       const normal=Vector.rotate({x:0,y:-1},beam.angle);
-      const rel=Vector.sub(position,beam.position);
+      const rel=Vector.sub(blob.position,beam.position);
       const along=clamp(rel.x*axis.x+rel.y*axis.y,-len/2,len/2);
-      return Vector.add(beam.position,Vector.add(Vector.mult(axis,along),Vector.mult(normal,30)));
+      const sideNudge = Math.sign(blob.position.x-beam.position.x)||Math.sign(Math.cos(blob.personality?.wanderAngle||0))||1;
+      const topPoint = Vector.add(beam.position,Vector.add(Vector.mult(axis,along),Vector.mult(normal,30)));
+
+      // If already close to a beam, aim slightly to the side so the blob doesn't
+      // stand still under/against the same beam target forever.
+      if(Vector.magnitude(Vector.sub(topPoint,blob.position))<115){
+        return {x:topPoint.x+sideNudge*45,y:topPoint.y};
+      }
+      return topPoint;
     }
 
     function allInterestingStructures(blob, now){
       const p=blob.personality;
       const options=[];
+      const localRadius=clamp(125 + blob.circleRadius*3.5 + p.curiosity*26, 120, 235);
+
       for(const beam of beams){
-        const target=pointOnBeam(beam,blob.position);
+        if(now < (p.beamLeaveUntil||0)) continue;
+        if(!beam || !beam.position) continue;
+        const target=pointOnBeamForBlob(blob,beam);
+        if(!target || !Number.isFinite(target.x) || !Number.isFinite(target.y)) continue;
         const d=Vector.magnitude(Vector.sub(target,blob.position));
-        if(d>760) continue;
-        const bias=p.interestBias==='beams'?0.72:p.interestBias==='wander'?1.12:1.0;
+        if(d>localRadius) continue;
+        if(p.avoidExploreKind==='beam' && p.avoidExploreId===beam.id && now < (p.avoidExploreUntil||0)) continue;
+        const bias=p.interestBias==='beams'?1.08:p.interestBias==='wander'?1.28:1.22;
         const score=d*bias/(0.75+p.curiosity*0.45);
         options.push({kind:'beam',body:beam,target,dist:d,score});
       }
+
       for(const portal of [portalA,portalB].filter(Boolean)){
-        if(now < (p.portalAvoidUntil||0)) continue;
-        // Curiosity should pull blobs toward the actual portal opening, not the
-        // external rotate/arrow handle. The teleport check itself still enforces
-        // front-side entry, so the blob has to reach the oval centre naturally.
         const target={x:portal.position.x,y:portal.position.y};
         const d=Vector.magnitude(Vector.sub(target,blob.position));
-        if(d>820) continue;
+        if(d>localRadius) continue;
+        if(p.avoidExploreKind==='portal' && p.avoidExploreId===portal.id && now < (p.avoidExploreUntil||0)) continue;
+        if(now < (p.portalAvoidUntil||0)) continue;
         const bias=p.interestBias==='portals'?0.76:p.interestBias==='wander'?1.22:1.05;
         const portalCaution=1+(p.portalTrips||0)*0.32+p.fearfulness*0.10;
-        const score=d*bias*portalCaution/(0.72+p.curiosity*0.40);
+        const score=d*bias*portalCaution/(0.70+p.curiosity*0.45);
         options.push({kind:'portal',body:portal,target,dist:d,score});
       }
+
       return options.sort((a,b)=>a.score-b.score);
     }
 
     function chooseInterestingStructure(blob, now){
       const p=blob.personality;
-      if(p.dead||p.infected||p.fakeDead) return null;
+      if(p.dead||p.infected||p.fakeDead||needsSleepFocus(blob)) return null;
       const frightened = p.scared && p.scaredUntil && now < p.scaredUntil;
       if(frightened || p.agitation>85 || now < (p.exploreBoredUntil||0)) return null;
 
@@ -928,44 +999,120 @@
       if(now < (p.portalTraumaUntil||0) || now < portalFearUntil){
         options = options.filter(o=>o.kind!=='portal');
       }
-      if(!options.length){ p.exploreTargetKind=null; p.exploreTargetId=null; return null; }
+      if(!options.length){
+        p.exploreTargetKind=null;
+        p.exploreTargetId=null;
+        p.blockedOnTargetSince=0;
+        return null;
+      }
 
-      // Keep a chosen target for a while so they look intentional, then drift to another item.
       let current=options.find(o=>o.kind===p.exploreTargetKind && o.body.id===p.exploreTargetId);
       if(current && now < (p.exploreTargetUntil||0)) return current;
 
-      // Prefer not to choose the exact same item again unless it is the only thing around.
-      const fresh=options.filter(o=>!(o.kind===p.lastInterestingKind && o.body.id===p.exploreTargetId));
+      const fresh=options.filter(o=>{
+        const sameLast = o.kind===p.lastInterestingKind && o.body.id===p.exploreTargetId;
+        const avoided = o.kind===p.avoidExploreKind && o.body.id===p.avoidExploreId && now < (p.avoidExploreUntil||0);
+        return !sameLast && !avoided;
+      });
       const pool=fresh.length?fresh:options;
       const pickPool=pool.slice(0,Math.min(pool.length,3));
       const chosen=pickPool[Math.floor(Math.random()*pickPool.length)];
+
       p.exploreTargetKind=chosen.kind;
       p.exploreTargetId=chosen.body.id;
-      p.exploreTargetUntil=now+rand(5000,11000);
+      p.exploreTargetUntil=now+rand(3500,7500);
       p.lastInterestingKind=chosen.kind;
       p.stuckTimer=0;
+      p.blockedOnTargetSince=0;
       p.lastExploreX=blob.position.x;
+      p.lastExploreY=blob.position.y;
       return chosen;
     }
 
 
 
     function nearestQuietSpot(blob){
-      const samples=10;
-      let best={x:blob.position.x+Math.cos(blob.personality.wanderAngle||0)*140,y:canvas.height-blob.circleRadius-12,score:-Infinity};
+      const samples=18;
+      const y=canvas.height-blob.circleRadius-12;
+      let best={x:blob.position.x+Math.cos(blob.personality.wanderAngle||0)*160,y,score:-Infinity};
+
       for(let i=0;i<samples;i++){
-        const x=rand(canvas.width*0.08,canvas.width*0.92);
-        let nearest=Infinity;
+        // Prefer sides/corners a bit, because those are naturally quieter.
+        const sideBias=Math.random();
+        let x;
+        if(sideBias<0.34) x=rand(canvas.width*0.05,canvas.width*0.22);
+        else if(sideBias<0.68) x=rand(canvas.width*0.78,canvas.width*0.95);
+        else x=rand(canvas.width*0.20,canvas.width*0.80);
+
+        let nearestBlob=Infinity;
         for(const other of blobs){
           if(other===blob || other.personality.dead) continue;
-          const d=Math.abs(other.position.x-x)+Math.abs(other.position.y-(canvas.height-blob.circleRadius-12))*0.25;
-          nearest=Math.min(nearest,d);
+          const d=Math.abs(other.position.x-x)+Math.abs(other.position.y-y)*0.35;
+          nearestBlob=Math.min(nearestBlob,d);
         }
-        const wallPenalty=Math.min(x,canvas.width-x)*0.12;
-        const score=nearest+wallPenalty+rand(-35,35);
-        if(score>best.score) best={x,y:canvas.height-blob.circleRadius-12,score};
+
+        let structurePenalty=0;
+        for(const beam of beams){
+          const bw=beam.plugin?.w||200;
+          const rel=Vector.rotate({x:x-beam.position.x,y:y-beam.position.y},-(beam.angle||0));
+          const nearBeam=Math.abs(rel.x)<bw/2+120 && Math.abs(rel.y)<130;
+          if(nearBeam) structurePenalty+=260;
+        }
+        for(const p of [portalA,portalB].filter(Boolean)){
+          const d=Math.hypot(x-p.position.x,y-p.position.y);
+          if(d<260) structurePenalty += 320-d;
+        }
+
+        // Avoid exact wall-sticking, but still like quiet side areas.
+        const wallComfort = Math.min(x,canvas.width-x) < canvas.width*0.16 ? 55 : 0;
+        const score=nearestBlob + wallComfort - structurePenalty + rand(-25,25);
+        if(score>best.score) best={x,y,score};
       }
+
       return best;
+    }
+
+
+
+    function sleepHazardRepulsion(blob){
+      const p=blob.personality;
+      let awayX=0, danger=0;
+
+      // Other blobs are the biggest risk: they can wake the sleeper.
+      for(const other of blobs){
+        if(other===blob || other.personality.dead) continue;
+        const dx=blob.position.x-other.position.x;
+        const dy=blob.position.y-other.position.y;
+        const d=Math.hypot(dx,dy);
+        const safe=150 + blob.circleRadius + other.circleRadius;
+        if(d>0 && d<safe){
+          const push=(safe-d)/safe;
+          awayX += (dx/d)*push*2.2;
+          danger += push*1.8;
+        }
+      }
+
+      // Avoid beams and portals too; they attract traffic/play and cause wakeups.
+      for(const beam of beams){
+        const bw=beam.plugin?.w||200;
+        const rel=Vector.rotate(Vector.sub(blob.position,beam.position),-(beam.angle||0));
+        if(Math.abs(rel.x)<bw/2+130 && Math.abs(rel.y)<150){
+          const pushX = rel.x>=0 ? 1 : -1;
+          awayX += pushX*0.9;
+          danger += 0.7;
+        }
+      }
+      for(const ptl of [portalA,portalB].filter(Boolean)){
+        const dx=blob.position.x-ptl.position.x;
+        const dy=blob.position.y-ptl.position.y;
+        const d=Math.hypot(dx,dy);
+        if(d<290){
+          awayX += (dx/(d||1))*(1-d/290)*1.6;
+          danger += (1-d/290)*1.2;
+        }
+      }
+
+      return {awayX, danger};
     }
 
     function applySocialSpacing(blob, now, grounded){
@@ -1027,9 +1174,17 @@
         }
         setBlobLook(blob,{x:p.quietTarget.x,y:blob.position.y-8},'quiet',2,700,now);
         if(Math.abs(dx)<38){
-          p.restMode='sleeping';
-          p.restUntil=now+rand(2500,6500);
-          p.quietUntil=now+rand(5000,10000);
+          // Reaching a quiet place is not enough to sleep.
+          // Only sleep if the rare sleep timer has actually matured.
+          if(now > (p.nextSleepEligibleAt||Infinity)){
+            p.restMode='sleeping';
+            p.restUntil=now+rand(4500,9500);
+            p.restStartedAt=now;
+            p.sleepWellAt=now+3000;
+          }else{
+            p.quietUntil=now+rand(5000,12000);
+            p.restMode=null;
+          }
         }
         return true;
       }
@@ -1055,10 +1210,12 @@
         const bw=beam.plugin?.w || 200;
         const bh=beam.plugin?.h || 20;
         const rel=Vector.rotate(Vector.sub(blob.position,beam.position),-(beam.angle||0));
-        const withinX=Math.abs(rel.x) < bw/2 + r*0.72;
+        const withinX=Math.abs(rel.x) < bw/2 + r*0.42;
         const topY=-bh/2;
-        const closeToTop=rel.y < topY && rel.y > topY - r*1.25 - 8;
-        if(withinX && closeToTop && blob.velocity.y >= -1.2) return true;
+        // Only count as support when the blob is truly above the beam's top surface.
+        // The old wider check could treat nearby/under-beam blobs as grounded and freeze behavior.
+        const closeToTop=rel.y < topY && rel.y > topY - r*0.75 - 5;
+        if(withinX && closeToTop && blob.velocity.y >= -0.2) return true;
       }
       return false;
     }
@@ -1080,13 +1237,14 @@
       // If they are in a blob pile without world support, reduce sideways impulse too.
       // This keeps piles from turning into boost engines while preserving collision.
       const sideScale = worldSupported ? 1 : 0.32;
+      const energyScale = blob.personality?.infected ? 1 : energyMovementScale(blob);
 
-      Body.applyForce(blob,blob.position,{x:directionX*sideForce*sideScale,y:safeHop});
+      Body.applyForce(blob,blob.position,{x:directionX*sideForce*sideScale*energyScale,y:safeHop});
     }
 
     function handCuriosity(blob, now){
       const p=blob.personality;
-      if(deleteToolActive || p.dead || p.infected || p.fakeDead || now > handActiveUntil) return null;
+      if(deleteToolActive || p.dead || p.infected || p.fakeDead || needsSleepFocus(blob) || now > handActiveUntil) return null;
       const toHand=Vector.sub(mouse.position,blob.position);
       const distance=Vector.magnitude(toHand);
       if(!distance) return null;
@@ -1235,6 +1393,318 @@
       };
     }
 
+
+
+    function wakeSleepingBlob(blob, reason='bump'){
+      const p=blob?.personality;
+      if(!p || p.dead || p.infected || p.restMode!=='sleeping') return false;
+      const now=Date.now();
+
+      // Fully leave every sleep/rest state. The previous version showed wake
+      // particles but could still be treated as sleeping by the next behavior pass.
+      p.restMode=null;
+      p.restUntil=0;
+      p.restStartedAt=0;
+      p.quietTarget=null;
+      p.quietUntil=0;
+      p.lookSleep=false;
+      p.blinkUntil=0;
+      p.nextSleepParticle=now+999999;
+
+      const sleptEnough = now >= (p.sleepWellAt||Infinity);
+      if(!sleptEnough){
+        p.sleepInterrupted=(p.sleepInterrupted||0)+1;
+        p.sleepDebt=clamp((p.sleepDebt||0)+18+(reason==='hard-bump'?10:0),0,160);
+        p.energy=clamp((p.energy||0)-0.08,0,1);
+      }
+      p.emergencySleep=false;
+
+      p.awakeUntil=now+rand(6000,12000);
+      p.agitation=Math.max(p.agitation||0, reason==='hard-bump'?65:36);
+      p.scared = reason==='hard-bump';
+      if(reason==='hard-bump') p.scaredUntil=now+1800;
+      // If sleep was interrupted, don't instantly try again. Pick a new natural window.
+      scheduleNextSleep(blob, now, false);
+      p.wanderAngle += rand(-1.6,1.6);
+
+      // Small physical nudge so the wake-up is visibly different from sleep.
+      if(Math.abs(blob.velocity.x)<0.35){
+        Body.setVelocity(blob,{x:blob.velocity.x+rand(-0.7,0.7),y:blob.velocity.y});
+      }
+      for(let i=0;i<3;i++){
+        particles.push({
+          x:blob.position.x+rand(-blob.circleRadius*0.25,blob.circleRadius*0.25),
+          y:blob.position.y-blob.circleRadius-rand(4,12),
+          vx:rand(-0.12,0.12),
+          vy:rand(-0.55,-0.25),
+          r:Math.max(7,blob.circleRadius*0.32),
+          life:rand(600,1100),
+          start:Date.now(),
+          kind:'wake'
+        });
+      }
+      return true;
+    }
+
+    function handleSleepingBlob(blob, now, grounded){
+      const p=blob.personality;
+      if(!p || p.dead || p.infected || p.fakeDead || p.restMode!=='sleeping') return false;
+      if(now < (p.awakeUntil||0)){
+        p.restMode=null;
+        p.restUntil=0;
+        p.lookSleep=false;
+        return false;
+      }
+
+      p.lookSleep=true;
+      p.scared=false;
+      p.agitation=Math.max(0,(p.agitation||0)-1.4);
+
+      // The blob itself should not decide to walk/hop while asleep.
+      // Keep it a normal physics body though, so the cursor/other blobs can still shove it.
+      if(grounded){
+        const externalPush = Math.abs(blob.force.x) > 0.00002 || Math.abs(blob.force.y) > 0.00002;
+        if(!externalPush){
+          Body.setVelocity(blob,{x:blob.velocity.x*0.78,y:blob.velocity.y});
+        }
+        Body.setAngularVelocity(blob,0);
+      }else if(Vector.magnitude(blob.velocity)<0.2){
+        // Sleeping in mid-air should still fall.
+        Body.setVelocity(blob,{x:blob.velocity.x,y:Math.max(blob.velocity.y,0.7)});
+      }
+
+      if(now > (p.nextSleepParticle||0)){
+        addSleepParticle(blob);
+        p.nextSleepParticle=now+rand(700,1350);
+      }
+
+      if(!p.sleepWellAt) p.sleepWellAt=(p.restStartedAt||now)+3000;
+      const sleptWell = now >= (p.sleepWellAt||Infinity);
+
+      if(now >= (p.restUntil||0)){
+        p.restMode=null;
+        p.wanderAngle += rand(-2.2,2.2);
+        p.lookSleep=false;
+        p.sleepWellAt=0;
+        // After sleeping well for at least 3 seconds: restore energy, then
+        // guarantee a 2 minute cooldown before another sleep window can start.
+        if(sleptWell){
+          const emergencyBonus = p.emergencySleep ? 0.22 : 0;
+          p.energy=clamp((p.energy ?? 0.4)+0.38+emergencyBonus,0,1);
+          p.sleepDebt=Math.max(0,(p.sleepDebt||0)-(p.emergencySleep?68:42));
+          p.sleepInterrupted=Math.max(0,(p.sleepInterrupted||0)-1.5);
+          p.tired=p.energy<0.30 || (p.sleepDebt||0)>55;
+          p.emergencySleep=false;
+        }
+        scheduleNextSleep(blob, now, sleptWell);
+        return false;
+      }
+      return true;
+    }
+
+
+
+    function needsSleepFocus(blob){
+      const p=blob.personality;
+      if(!p || p.dead || p.infected) return false;
+      return (p.tired === true) || ((p.energy ?? 1) < 0.28) || ((p.sleepDebt || 0) > 42);
+    }
+
+
+    function forceEmergencySleep(blob, now){
+      const p=blob.personality;
+      if(!p || p.dead || p.infected || p.fakeDead || p.restMode==='sleeping') return false;
+
+      p.restMode='sleeping';
+      p.emergencySleep=true;
+      p.forcedSleeps=(p.forcedSleeps||0)+1;
+      p.restStartedAt=now;
+      p.restUntil=now+rand(6500,10500);
+      p.sleepWellAt=now+3000;
+      p.lookSleep=true;
+      p.scared=false;
+      p.agitation=0;
+      p.exploreTargetKind=null;
+      p.exploreTargetId=null;
+      p.exploreTargetUntil=0;
+      p.quietTarget=null;
+      p.quietUntil=0;
+      Body.setVelocity(blob,{x:blob.velocity.x*0.08,y:blob.velocity.y});
+      return true;
+    }
+
+    function updateEnergy(blob, now){
+      const p=blob.personality;
+      if(!p || p.dead || p.infected) return;
+
+      const speed=Vector.magnitude(blob.velocity || {x:0,y:0});
+      const movingCost = speed > 1.5 ? 0.000018*clamp(speed,0,18) : 0;
+      const panicCost = p.scared ? 0.00011 : 0;
+      const ageCost = clamp(p.age/42000,0,1)*0.000035;
+      const baseDrain = 0.000055;
+
+      if(p.restMode==='sleeping'){
+        // Sleep becomes useful after the blob has actually slept well for 3 seconds.
+        if(now >= (p.sleepWellAt||Infinity)){
+          p.energy = clamp((p.energy ?? 0.8) + 0.0038, 0, 1);
+          p.sleepDebt = Math.max(0,(p.sleepDebt||0)-0.34);
+          p.sleepInterrupted = Math.max(0,(p.sleepInterrupted||0)-0.02);
+          p.tired = p.energy < 0.42 || (p.sleepDebt||0)>45;
+        }
+      }else{
+        p.energy = clamp((p.energy ?? 0.8) - baseDrain - movingCost - panicCost - ageCost, 0, 1);
+
+        // If energy stays too low, sleep deprivation starts harming the blob.
+        if((p.energy ?? 1) < 0.18){
+          p.sleepDebt=clamp((p.sleepDebt||0)+0.11,0,160);
+          p.trauma += 0.055 + (p.sleepDebt||0)*0.0009;
+        }else if((p.energy ?? 1) < 0.34){
+          p.sleepDebt=clamp((p.sleepDebt||0)+0.035,0,160);
+        }else{
+          p.sleepDebt=Math.max(0,(p.sleepDebt||0)-0.012);
+        }
+
+        // Sleep-deprived blobs should seek sleep sooner. This does not force
+        // instant sleep; it just brings their next sleep window forward.
+        if((p.sleepDebt||0)>35 && now > (p.awakeUntil||0)){
+          const urgency=clamp((p.sleepDebt||0)/130,0,1);
+          const soon=now+rand(8000,42000-(urgency*24000));
+          p.nextSleepEligibleAt=Math.min(p.nextSleepEligibleAt||Infinity,soon);
+          p.restCooldownUntil=Math.min(p.restCooldownUntil||Infinity,p.nextSleepEligibleAt);
+        }
+
+        // Repeated interrupted naps make deprivation worse even if energy is not totally empty.
+        if((p.sleepInterrupted||0)>2 && (p.energy??1)<0.45){
+          p.trauma += (p.sleepInterrupted||0)*0.006;
+        }
+
+        p.tired = p.energy < 0.30 || (p.sleepDebt||0)>55;
+      }
+
+      // Energy/sleep debt influences mood and eventually health.
+      if(p.energy < 0.22 || (p.sleepDebt||0)>50) p.mood=clamp((p.mood||0)-0.0015,0,1);
+      else if(p.energy > 0.74 && (p.sleepDebt||0)<15 && !p.scared) p.mood=clamp((p.mood||0)+0.00045,0,1);
+
+      // Emergency exhaustion behavior:
+      // Before dying from sleep deprivation, the blob should force itself to
+      // sleep once or twice. Beams/portals/nearby toys do not block this.
+      if((p.sleepDebt||0)>105 && (p.forcedSleeps||0)<2 && p.restMode!=='sleeping' && !p.fakeDead){
+        forceEmergencySleep(blob, now);
+        return;
+      }
+
+      if((p.sleepDebt||0)>145 && (p.forcedSleeps||0)>=2 && !p.unkillableBlobzilla){
+        markDead(blob,'sleep');
+      }
+    }
+
+    function energyMovementScale(blob){
+      const p=blob.personality;
+      if(!p || p.infected) return 1;
+      // Tired blobs still move, but they become calmer and jump less.
+      return clamp(0.42 + (p.energy ?? 1)*0.78, 0.42, 1.15);
+    }
+
+
+
+    function leaveBeamHangout(blob, now, beam=null){
+      const p=blob.personality;
+      p.beamLeaveUntil=now+rand(9000,18000);
+      p.beamHangoutUntil=0;
+      if(beam){
+        p.avoidExploreKind='beam';
+        p.avoidExploreId=beam.id;
+        p.avoidExploreUntil=now+rand(12000,22000);
+      }
+      p.exploreTargetKind=null;
+      p.exploreTargetId=null;
+      p.exploreTargetUntil=0;
+      p.exploreBoredUntil=now+rand(1600,3200);
+      const away = beam ? Math.sign(blob.position.x-beam.position.x)||Math.sign(Math.cos(p.wanderAngle))||1 : Math.sign(Math.cos(p.wanderAngle))||1;
+      p.wanderAngle = away>0 ? rand(-0.35,0.35) : Math.PI+rand(-0.35,0.35);
+      if(hasWorldSupport(blob)){
+        applyGroundedMovement(blob,away,-0.0018*energyMovementScale(blob),0.0032);
+      }
+    }
+
+    function markExploreTargetBlocked(blob, now){
+      const p=blob.personality;
+      if(!p.exploreTargetKind || !p.exploreTargetId) return;
+      p.avoidExploreKind=p.exploreTargetKind;
+      p.avoidExploreId=p.exploreTargetId;
+      p.avoidExploreUntil=now+rand(7000,14000);
+      p.exploreTargetKind=null;
+      p.exploreTargetId=null;
+      p.exploreTargetUntil=0;
+      p.exploreBoredUntil=now+rand(900,1800);
+      p.blockedOnTargetSince=0;
+      p.stuckTimer=0;
+      p.wanderAngle += Math.PI + rand(-0.8,0.8);
+    }
+
+
+
+    function preventGroundFreeze(blob, now, grounded){
+      const p=blob.personality;
+      if(!p || p.dead || p.infected || p.fakeDead || p.restMode==='sleeping') return;
+      if(!grounded) return;
+
+      const speed=Vector.magnitude(blob.velocity || {x:0,y:0});
+      const hasAttention =
+        p.exploreTargetKind ||
+        p.restMode==='walking' ||
+        p.quietTarget ||
+        (p.scaredUntil && now < p.scaredUntil) ||
+        needsSleepFocus(blob);
+
+      // If the blob has become passive while awake, give it a tiny life pulse.
+      // This is not cursor attraction and not mid-air steering; it only happens
+      // when grounded and awake, so they keep feeling alive without needing the hand.
+      if(speed < 0.08 && !hasAttention){
+        if(!p.idleNudgeUntil || now > p.idleNudgeUntil){
+          p.wanderAngle += rand(-1.4,1.4);
+          p.idleNudgeUntil = now + rand(900,2200);
+        }
+        const dir=Math.sign(Math.cos(p.wanderAngle)) || (Math.random()<0.5?-1:1);
+        Body.applyForce(blob,blob.position,{x:dir*0.00095*energyMovementScale(blob),y:0});
+        setBlobLook(blob,{x:blob.position.x+dir*80,y:blob.position.y-8},'idle',1,900,now);
+      }
+
+      // If it is pressed against another blob/structure and not moving, wiggle sideways a little.
+      if(speed < 0.12){
+        const nearBlob=blobs.find(o=>{
+          if(o===blob || o.personality.dead) return false;
+          const d=Vector.magnitude(Vector.sub(o.position,blob.position));
+          return d < (o.circleRadius+blob.circleRadius)*1.25;
+        });
+        if(nearBlob && Math.random()<0.018){
+          const away=Math.sign(blob.position.x-nearBlob.position.x)||Math.sign(Math.cos(p.wanderAngle))||1;
+          Body.applyForce(blob,blob.position,{x:away*0.00125*energyMovementScale(blob),y:0});
+        }
+      }
+    }
+
+    function preventAirFreeze(blob, now, grounded){
+      const p=blob.personality;
+      if(!p || p.dead) return;
+
+      const speed=Vector.magnitude(blob.velocity || {x:0,y:0});
+      const nearFloor=blob.position.y > canvas.height-blob.circleRadius-48;
+
+      // If Matter or a behavior state leaves a blob almost motionless in mid-air,
+      // do not make it "choose a target" in the air. Just let physics resume by
+      // giving it a tiny downward wake-up nudge.
+      if(!grounded && !nearFloor && speed < 0.18){
+        Body.setStatic(blob,false);
+        Body.setVelocity(blob,{x:blob.velocity.x*0.8,y:Math.max(blob.velocity.y,0.65)});
+        Body.applyForce(blob,blob.position,{x:0,y:0.0018*blob.mass});
+        p.airStuckUntil=now+650;
+      }
+
+      // If it is touching the underside of a beam/top wall, use the existing bonk logic.
+      bonkCeilingIfNeeded(blob);
+    }
+
     function livelyBehaviour(blob, now, touching, dist, dir){
       const p=blob.personality;
       const sizeFactor=Math.min(blob.circleRadius/40,3);
@@ -1242,8 +1712,15 @@
       const ageHeaviness=clamp(p.age/26000,0,0.35);
       // Smaller/younger blobs are springier; older/bigger blobs become heavier and hop lower.
       const agility=clamp(1.38-(blob.circleRadius/70)-ageHeaviness,0.58,1.35);
-      const jumpLimiter=p.infected?0.75:agility;
+      const energyScale=energyMovementScale(blob);
+      const jumpLimiter=(p.infected?0.75:agility)*energyScale;
       const grounded=hasWorldSupport(blob);
+      preventAirFreeze(blob, now, grounded);
+      preventGroundFreeze(blob, now, grounded);
+      if(handleSleepingBlob(blob, now, grounded)){
+        updateBlobLook(blob);
+        return;
+      }
       const crowding=blobCrowdingFactor(blob);
       const jumpDampen=1-crowding*0.38; // prevents stacked blobs from boosting each other sky-high
 
@@ -1261,7 +1738,8 @@
       const nearestHealthy=p.infected ? findNearestBlob(blob,o=>!o.personality.infected,Infinity) : null;
       const nearestInfected=!p.infected ? findNearestBlob(blob,o=>o.personality.infected,560) : null;
       const portalDanger=!nearestInfected ? portalThreat(blob, now) : null;
-      const cursorDanger=(!nearestInfected && !portalDanger) ? cursorThreat(blob, now) : null;
+      const sleepFocus = needsSleepFocus(blob);
+      const cursorDanger=(!sleepFocus && !nearestInfected && !portalDanger) ? cursorThreat(blob, now) : null;
       if(nearestInfected){
         setBlobLook(blob,{x:nearestInfected.blob.position.x, y:nearestInfected.blob.position.y},'danger',5,560,now);
         p.scared=true;
@@ -1314,9 +1792,63 @@
         }
       }
 
-      const socialBusy = (!nearestInfected && !portalDanger && !cursorDanger) ? applySocialSpacing(blob, now, grounded) : false;
+      if(sleepFocus && !nearestInfected){
+        // Tired blobs stop being curious and focus on finding a quiet sleeping spot.
+        // They ignore the hand/cursor, beams, and portals. Only direct clicks or impacts wake them.
+        p.exploreTargetKind=null;
+        p.exploreTargetId=null;
+        p.exploreTargetUntil=0;
+        p.exploreBoredUntil=now+5000;
+        if(p.restMode!=='sleeping' && p.restMode!=='walking') p.restMode=null;
 
-      const handTarget = (!socialBusy && !nearestInfected && !portalDanger && !cursorDanger) ? handCuriosity(blob, now) : null;
+        // If deprivation is severe, nothing environmental can keep them awake.
+        // They may still be woken by direct click/pickup or another blob impact.
+        if((p.sleepDebt||0)>95 && now > (p.awakeUntil||0) && p.restMode!=='sleeping'){
+          if(forceEmergencySleep(blob, now)){
+            updateBlobLook(blob);
+            return;
+          }
+        }
+
+        const hazard=sleepHazardRepulsion(blob);
+        if(!p.quietTarget || now > (p.quietUntil||0) || hazard.danger>1.2){
+          p.quietTarget=nearestQuietSpot(blob);
+          p.quietUntil=now+rand(7000,15000);
+        }
+
+        let dx=(p.quietTarget?.x ?? blob.position.x)-blob.position.x;
+        let moveX=Math.sign(dx)||Math.cos(p.wanderAngle)||1;
+
+        // If something is too close, flee that first before heading to the quiet target.
+        if(Math.abs(hazard.awayX)>0.05){
+          moveX=Math.sign(hazard.awayX);
+        }
+
+        if(grounded){
+          const urgency=clamp((p.sleepDebt||0)/130,0,1);
+          const hop = Math.random()<(0.006+urgency*0.006) ? -0.0017*jumpLimiter*jumpDampen : 0;
+          const side = 0.0019 + urgency*0.0012 + clamp(hazard.danger,0,2)*0.0008;
+          applyGroundedMovement(blob,moveX,hop,side);
+        }
+        setBlobLook(blob,{x:blob.position.x+moveX*80,y:blob.position.y-8},'sleep-focus',4,900);
+
+        const quietEnough = hazard.danger < 0.35;
+        const atQuietSpot = Math.abs(dx)<55;
+        const sleepReady = now > (p.awakeUntil||0) && now > (p.nextSleepEligibleAt||0);
+
+        if(quietEnough && atQuietSpot && sleepReady){
+          p.restMode='sleeping';
+          p.restUntil=now+rand(5200,9800);
+          p.restStartedAt=now;
+          p.sleepWellAt=now+3000;
+          p.lookSleep=true;
+          Body.setVelocity(blob,{x:blob.velocity.x*0.1,y:blob.velocity.y});
+        }
+      }
+
+      const socialBusy = (!sleepFocus && !nearestInfected && !portalDanger && !cursorDanger) ? applySocialSpacing(blob, now, grounded) : false;
+
+      const handTarget = (!sleepFocus && !socialBusy && !nearestInfected && !portalDanger && !cursorDanger) ? handCuriosity(blob, now) : null;
       if(handTarget){
         setBlobLook(blob,{x:mouse.position.x, y:mouse.position.y},'hand',4,420,now);
         // The hand is more interesting than beams/portals. It can interrupt
@@ -1340,15 +1872,25 @@
 
       // Older/larger blobs sometimes stop being curious, walk off to one side,
       // and sleep for a moment. This breaks up the constant item ping-pong.
-      const matureEnough = p.age > 4800 + p.ageOffset || blob.circleRadius > 22;
+      if((p.tired || (p.sleepDebt||0)>45) && !p.restMode && !p.scared && now > (p.awakeUntil||0)){
+        // Tired/sleep-deprived blobs become more likely to use their next
+        // sleep window, but still won't insta-sleep right after being woken.
+        const debtUrgency=clamp((p.sleepDebt||0)/130,0,1);
+        p.nextSleepEligibleAt=Math.min(p.nextSleepEligibleAt||Infinity, now+rand(7000,26000-(debtUrgency*14000)));
+      }
+
       const calmEnough = !handTarget && !p.infected && !nearestInfected && !p.fakeDead && !p.scared && p.agitation < 45;
       if(!calmEnough){
-        p.restMode=null;
-      }else if(matureEnough && !p.restMode && now > (p.restCooldownUntil||0) && Math.random()<0.0018){
+        if(p.restMode!=='sleeping') p.restMode=null;
+        if(now > (p.nextSleepEligibleAt||Infinity) && Math.random()<0.004){
+          scheduleNextSleep(blob, now, false, false);
+        }
+      }else if(!p.restMode && now > (p.awakeUntil||0) && now > (p.nextSleepEligibleAt||p.restCooldownUntil||0) && Math.random()<(0.0022+clamp((p.sleepDebt||0)/140,0,1)*0.014)){
         const goLeft = Math.random()<0.5;
         p.restMode='walking';
         p.restTargetX = goLeft ? rand(canvas.width*0.08, canvas.width*0.24) : rand(canvas.width*0.76, canvas.width*0.92);
         p.restStartedAt=now;
+        p.sleepWellAt=0;
         p.exploreTargetKind=null; p.exploreTargetId=null; p.exploreTargetUntil=0;
         p.exploreBoredUntil=now+3500;
       }
@@ -1364,6 +1906,8 @@
         if(Math.abs(dx)<42 || now-(p.restStartedAt||now)>9000){
           p.restMode='sleeping';
           p.restUntil=now+rand(4500,9500);
+          p.restStartedAt=now;
+          p.sleepWellAt=now+3000;
           p.mood=clamp(p.mood+0.12,0,1);
           Body.setVelocity(blob,{x:blob.velocity.x*0.25,y:blob.velocity.y});
         }
@@ -1377,54 +1921,83 @@
           }
         }else{
           p.restMode=null;
-          p.restCooldownUntil=now+rand(12000,26000);
+          scheduleNextSleep(blob, now, true);
           p.wanderAngle += rand(-2.2,2.2);
         }
       }
 
       // Idle/exploration behavior. Curiosity only applies while grounded/touching,
       // so blobs cannot steer or change direction in mid-air.
-      const curiousTarget = !socialBusy && !handTarget && !portalDanger && !restingNow && !p.infected && !nearestInfected ? chooseInterestingStructure(blob, now) : null;
+      const curiousTarget = !sleepFocus && !socialBusy && !handTarget && !portalDanger && !restingNow && !p.infected && !nearestInfected ? chooseInterestingStructure(blob, now) : null;
       if(curiousTarget){
         setBlobLook(blob,{x:curiousTarget.target.x, y:curiousTarget.target.y},curiousTarget.kind,3,700,now);
         const toTarget=Vector.sub(curiousTarget.target,blob.position);
         const targetDir=Vector.normalise(toTarget);
         const isBeam=curiousTarget.kind==='beam';
-        const close=curiousTarget.dist < (isBeam?115:82);
+        const close=curiousTarget.dist < (isBeam?58:82);
 
-        // Detect when a blob has fixated/stalled near an item; after a bit it gets bored
-        // and will drift to a different item or wander before selecting again.
-        if(touching){
-          const moved=Math.abs(blob.position.x-(p.lastExploreX ?? blob.position.x));
-          p.stuckTimer = (moved<2.2 && close) ? (p.stuckTimer+1) : Math.max(0,p.stuckTimer-2);
-          p.lastExploreX=blob.position.x;
-          if(close || p.stuckTimer>115){
-            if(now > (p.exploreCooldownUntil||0)){
-              p.exploreTargetUntil=0;
-              p.exploreCooldownUntil=now+rand(1800,3600);
-              p.exploreBoredUntil=now+rand(700,1600);
-              p.wanderAngle += rand(-1.8,1.8);
-              p.stuckTimer=0;
-            }
+        if(isBeam && close){
+          if(!p.beamHangoutUntil) p.beamHangoutUntil=now+rand(2800,6500);
+          if(now > (p.beamHangoutUntil||0)){
+            leaveBeamHangout(blob, now, curiousTarget.body);
           }
         }
 
+        // Detect when a blob is trying to reach an item but is blocked.
+        // After about 2 seconds, it gives up on that specific thing for a while
+        // and heads the other way instead of pushing into the obstacle/wall.
         if(grounded){
-          // Beam = playground, portal = cautious curiosity. Both are grounded movement only.
-          const sideForce=(isBeam?0.0027:0.0018)*clamp(p.curiosity,0.55,1.45);
-          const hopForce=isBeam ? -0.0035*jumpLimiter*jumpDampen : (close ? -0.0018*jumpLimiter*jumpDampen : -0.0011*jumpLimiter*jumpDampen);
-          applyGroundedMovement(blob,targetDir.x,hopForce,sideForce);
+          const movedX=Math.abs(blob.position.x-(p.lastExploreX ?? blob.position.x));
+          const movedY=Math.abs(blob.position.y-(p.lastExploreY ?? blob.position.y));
+          const movingEnough=(movedX+movedY)>2.4;
+          const targetSide=Math.sign(targetDir.x)||1;
+          const pushingWrongWay=(Math.abs(blob.velocity.x)<0.35 && Math.abs(toTarget.x)>65);
+          const atSideWall=(blob.position.x<blob.circleRadius+18 && targetSide<0) || (blob.position.x>canvas.width-blob.circleRadius-18 && targetSide>0);
+          const nearBeamButNotProgressing = isBeam && curiousTarget.dist < 130 && !movingEnough && Math.abs(blob.velocity.x)<0.45;
+          const seemsBlocked=(!movingEnough && !close) || pushingWrongWay || atSideWall || nearBeamButNotProgressing;
 
-          if(close && isBeam && Math.random()<0.016){
-            // Occasional playful hop, but never airborne steering.
-            applyGroundedMovement(blob,Math.cos(p.wanderAngle),-0.0048*jumpLimiter*jumpDampen,0.0018);
+          if(seemsBlocked){
+            p.blockedOnTargetSince = p.blockedOnTargetSince || now;
+          }else{
+            p.blockedOnTargetSince = 0;
+          }
+
+          p.stuckTimer = seemsBlocked ? (p.stuckTimer+1) : Math.max(0,p.stuckTimer-2);
+          p.lastExploreX=blob.position.x;
+          p.lastExploreY=blob.position.y;
+
+          if(close){
+            p.exploreTargetUntil=0;
+            p.exploreCooldownUntil=now+rand(1800,3600);
+            p.exploreBoredUntil=now+rand(700,1600);
+            p.wanderAngle += rand(-1.8,1.8);
+            p.stuckTimer=0;
+            p.blockedOnTargetSince=0;
+          }else if((p.blockedOnTargetSince && now-p.blockedOnTargetSince>(isBeam?900:2000)) || p.stuckTimer>(isBeam?45:120)){
+            if(isBeam) leaveBeamHangout(blob, now, curiousTarget.body);
+            else markExploreTargetBlocked(blob, now);
+            applyGroundedMovement(blob,-targetSide,-0.0024*jumpLimiter*jumpDampen,0.0026);
+          }
+        }
+
+        if(isBeam && now < (p.beamLeaveUntil||0)){
+          // Recently done playing with beams; let normal roaming take over.
+        }else if(grounded){
+          // Beam = short playground visit, portal = cautious curiosity. Both are grounded movement only.
+          const sideForce=(isBeam?0.0019:0.0018)*clamp(p.curiosity,0.55,1.35);
+          const beamHop = isBeam ? (close ? 0 : -0.0018*jumpLimiter*jumpDampen) : (close ? -0.0018*jumpLimiter*jumpDampen : -0.0011*jumpLimiter*jumpDampen);
+          applyGroundedMovement(blob,targetDir.x,beamHop,sideForce);
+
+          if(close && isBeam && Math.random()<0.0025){
+            // Very occasional playful hop; no beam obsession.
+            applyGroundedMovement(blob,Math.cos(p.wanderAngle),-0.0028*jumpLimiter*jumpDampen,0.0014);
           }
           if(close && !isBeam && Math.random()<0.012){
             p.agitation=Math.max(p.agitation,22*p.fearfulness);
             applyGroundedMovement(blob,targetDir.x,-0.0018*jumpLimiter*jumpDampen,0.0011);
           }
         }
-      }else if(grounded && !p.infected){
+      }else if(!sleepFocus && grounded && !p.infected){
         // No current item target: roam instead of sitting still. Some wander solo, some cluster.
         const friend=blobs.find(o=>o!==blob&&!o.personality.dead&&!o.personality.infected&&Vector.magnitude(Vector.sub(o.position,blob.position))<180);
         let roamX=Math.cos(p.wanderAngle);
@@ -1435,7 +2008,8 @@
         }
         // If there are structures in the world, occasionally bias the wander angle toward a different one.
         if((beams.length || portalA || portalB) && Math.random()<0.012){
-          const options=allInterestingStructures(blob,now);
+          let options=allInterestingStructures(blob,now);
+          if(now < (p.beamLeaveUntil||0)) options=options.filter(o=>o.kind!=='beam');
           if(options.length){
             const pick=options[Math.floor(Math.random()*Math.min(options.length,3))];
             roamX=Vector.normalise(Vector.sub(pick.target,blob.position)).x;
@@ -1445,13 +2019,13 @@
         const hopChance=p.interestBias==='wander'?0.035:0.022;
         if(Math.random()<hopChance/(1+sizeFactor*0.35)){
           applyGroundedMovement(blob,roamX,-0.0045*jumpLimiter*jumpDampen,0.0025*(0.75+p.curiosity*0.45));
-        }else if(Math.random()<0.075){
-          applyGroundedMovement(blob,roamX,0,0.0016*(0.75+p.curiosity*0.35));
+        }else if(Math.random()<0.115){
+          applyGroundedMovement(blob,roamX,0,0.0018*(0.75+p.curiosity*0.35));
         }
       }
 
       // If a blob is trying to move through other blobs, let the small/young ones hop over the pile.
-      if(!restingNow && grounded && !p.infected && Math.random()<0.030){
+      if(!sleepFocus && !restingNow && grounded && !p.infected && Math.random()<0.030){
         const forward={x:Math.cos(p.wanderAngle),y:0};
         const blocked=blobs.some(o=>{
           if(o===blob||o.personality.dead) return false;
@@ -1484,9 +2058,6 @@
       }else{
         // No max velocity for healthy blobs: throws, falls, and portal loops are allowed to become dangerous.
       }
-
-      // If they hit the underside of a beam/top wall while jumping, make them fall back down.
-      bonkCeilingIfNeeded(blob);
 
       // Extra anti-wall-stick guard: if they are pressing into a side wall, bleed horizontal speed.
       if((blob.position.x<blob.circleRadius+12 && blob.velocity.x<0) ||
@@ -1532,6 +2103,8 @@
       for(let i=blobs.length-1;i>=0;i--){
         const blob=blobs[i], p=blob.personality; if(p.dead) continue;
         p.age++;
+        if(typeof Sleeping!=='undefined') Sleeping.set(blob,false);
+        updateEnergy(blob, now);
         handleSweptPortalTeleport(blob, now);
         p.lastPosition={x:blob.position.x,y:blob.position.y};
         handleVirus(blob,now);
@@ -1540,6 +2113,18 @@
         if(p.dead) continue;
         if((blob.circleRadius<35||p.unkillableBlobzilla)&&p.age%120===0){ const s=p.unkillableBlobzilla?1+Math.min(0.0025,20/blob.circleRadius):1.01; Body.scale(blob,s,s); blob.circleRadius*=s; }
         if(!p.sterile && blob.circleRadius>=30&&p.age>7200+p.ageOffset&&!p.unkillableBlobzilla){
+          // Give the parent a tiny "><" strain face before splitting.
+          if(!p.splitFaceUntil){
+            p.splitFaceUntil=now+650;
+            p.agitation=Math.max(p.agitation,45);
+            Body.setVelocity(blob,{x:blob.velocity.x*0.45,y:blob.velocity.y});
+            for(let k=0;k<5;k++) particles.push({x:blob.position.x+rand(-blob.circleRadius*0.6,blob.circleRadius*0.6),y:blob.position.y+rand(-blob.circleRadius*0.8,0),vx:rand(-0.25,0.25),vy:rand(-0.7,-0.2),r:rand(2,4),life:rand(350,700),start:now,kind:'wake'});
+            continue;
+          }
+          if(now < p.splitFaceUntil){
+            continue;
+          }
+
           const parentR=blob.circleRadius,pos=blob.position,count=Math.random()<0.4?1:2;
           for(let j=0;j<count;j++){
             const r=Math.max(6,parentR*(0.25+Math.random()*0.15));
@@ -1675,8 +2260,8 @@
         ctx.save();
         ctx.translate(b.position.x,b.position.y);
         ctx.rotate(speed>0.8?angle:0);
-        ctx.globalAlpha=0.96;
-        ctx.shadowColor=p.infected?'rgba(255,60,70,.55)':'rgba(110,255,140,.28)';
+        ctx.globalAlpha=p.tired && !p.infected ? 0.80 : 0.96;
+        ctx.shadowColor=p.infected?'rgba(255,60,70,.55)':(p.tired?'rgba(180,220,180,.16)':'rgba(110,255,140,.28)');
         ctx.shadowBlur=p.infected?10:5;
         ctx.fillStyle=fill;
         ctx.beginPath();
@@ -1719,6 +2304,10 @@
           col=infectionAuraColor(p);
         }else{
           col=[100,255,100];
+          if((p.sleepDebt||0)>95) col=[175,145,255];
+          else if((p.sleepDebt||0)>55) col=[170,190,255];
+          else if((p.energy ?? 1)<0.20) col=[210,210,120];
+          else if((p.energy ?? 1)<0.36) col=[180,235,135];
           const t=p.trauma||0;
           if(t>=800) col=[255,0,0];
           else if(t>=500) col=[255,80,80];
@@ -1754,11 +2343,24 @@
       const ctx=render.context, now=Date.now(); ctx.save();
       blobs.forEach(b=>{
         const p=b.personality; if(!p||p.dead) return;
-        const r=b.circleRadius, blink=(now<p.blinkUntil)||p.fakeDead||p.lookSleep===true||p.restMode==='sleeping';
+        const r=b.circleRadius, blink=((now<p.blinkUntil)||p.fakeDead||((p.lookSleep===true)||(p.restMode==='sleeping' && !p.infected)) && now>(p.awakeUntil||0))||(p.tired && !p.infected && Math.sin(now/520+b.id)>0.82);
         const eyeY=b.position.y-r*0.22, eyeDx=r*0.35;
         let look=p.lookSmooth || {x:0,y:0};
         if(!Number.isFinite(look.x) || !Number.isFinite(look.y)) look={x:0,y:0};
         ctx.fillStyle=p.infected?(p.infectionStage==='terminal'?'#ffdede':'#fff2f2'):'#071407';
+
+        if(now < (p.splitFaceUntil||0)){
+          // Pre-split strain face: >< eyes, no mouth.
+          ctx.strokeStyle=ctx.fillStyle;
+          ctx.lineWidth=Math.max(2,r*0.105);
+          ctx.lineCap='round';
+          const exL=b.position.x-eyeDx, exR=b.position.x+eyeDx;
+          const sl=r*0.16;
+          ctx.beginPath(); ctx.moveTo(exL-sl,eyeY-r*0.10); ctx.lineTo(exL+sl,eyeY); ctx.lineTo(exL-sl,eyeY+r*0.10); ctx.stroke(); // >
+          ctx.beginPath(); ctx.moveTo(exR+sl,eyeY-r*0.10); ctx.lineTo(exR-sl,eyeY); ctx.lineTo(exR+sl,eyeY+r*0.10); ctx.stroke(); // <
+          return;
+        }
+
         if(p.infected){
           // Zombie face: angry eyes only. No mouth is drawn in any infected state.
           ctx.strokeStyle=ctx.fillStyle;
@@ -1814,7 +2416,20 @@
         const p=particles[i]; const t=(now-p.start)/p.life;
         if(t>=1){ particles.splice(i,1); continue; }
         p.x+=p.vx; p.y+=p.vy;
-        ctx.save(); ctx.globalAlpha=1-t; ctx.fillStyle=p.kind==='sick'?'#ff4455':p.kind==='portal'?'#9fd7ff':p.kind==='crack'?'#ffaa66':'#fff';
+        ctx.save();
+        ctx.globalAlpha=1-t;
+        if(p.kind==='sleep' || p.kind==='wake'){
+          ctx.fillStyle=p.kind==='wake'?'rgba(255,245,190,0.95)':'rgba(220,245,255,0.95)';
+          ctx.font=`${Math.max(10,p.r*(0.85+0.35*t))}px monospace`;
+          ctx.lineWidth=2;
+          ctx.strokeStyle='rgba(0,0,0,0.55)';
+          const symbol=p.kind==='wake'?'!':'Z';
+          ctx.strokeText(symbol,p.x,p.y-28*t);
+          ctx.fillText(symbol,p.x,p.y-28*t);
+          ctx.restore();
+          continue;
+        }
+        ctx.fillStyle=p.kind==='sick'?'#ff4455':p.kind==='portal'?'#9fd7ff':p.kind==='crack'?'#ffaa66':'#fff';
         ctx.beginPath(); ctx.arc(p.x,p.y,p.r*(1-t),0,Math.PI*2); ctx.fill(); ctx.restore();
       }
     });
