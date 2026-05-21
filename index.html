@@ -133,6 +133,8 @@
         friendId:null,loneliness:rand(0,1),curiosity:rand(0.3,1.4),
         lookAt:null,lookTarget:null,lookTargetKind:null,lookPriority:0,lookLockUntil:0,lookSmooth:{x:0,y:0},lookSleep:false,
         interestBias:Math.random()<0.45?'beams':(Math.random()<0.55?'portals':'wander'),
+        socialStyle:Math.random()<0.24?'loner':(Math.random()<0.54?'social':'neutral'),
+        personalSpace:rand(42,92),crowdStress:0,quietTarget:null,quietUntil:0,grudgeId:null,grudgeUntil:0,
         exploreCooldownUntil:0,lastInterestingKind:null,exploreTargetKind:null,exploreTargetId:null,exploreTargetUntil:0,
         exploreBoredUntil:0,stuckTimer:0,lastExploreX:null,
         portalSpin:0,portalAvoidUntil:0,portalTrips:0,
@@ -302,7 +304,7 @@
     /* Structure helpers */
     function updateBuildHint(text){ const el=document.getElementById('buildHint'); if(el) el.textContent=text; }
     function placeBeam(x,y,w=200,h=20,angle=0){
-      const beam=Bodies.rectangle(x,y,w,h,{isStatic:true,label:'beam',angle,render:{visible:false,fillStyle:'transparent'}});
+      const beam=Bodies.rectangle(x,y,w,h,{isStatic:true,label:'beam',angle,friction:0.18,frictionStatic:0.25,render:{visible:false,fillStyle:'transparent'}});
       beam.plugin={kind:'beam',stress:0,spawnGlow:Date.now(),w,h}; beams.push(beam); Composite.add(world,beam); selected=beam; return beam;
     }
     function setPortalGunActive(active){
@@ -327,7 +329,7 @@
       const idx=beams.indexOf(oldBeam);
       const stress=oldBeam?.plugin?.stress||0;
       Composite.remove(world,oldBeam);
-      const beam=Bodies.rectangle(x,y,w,h,{isStatic:true,label:'beam',angle,render:{visible:false,fillStyle:'transparent'}});
+      const beam=Bodies.rectangle(x,y,w,h,{isStatic:true,label:'beam',angle,friction:0.18,frictionStatic:0.25,render:{visible:false,fillStyle:'transparent'}});
       beam.plugin={kind:'beam',stress,spawnGlow:oldBeam?.plugin?.spawnGlow||Date.now(),w,h};
       if(idx>=0) beams[idx]=beam; else beams.push(beam);
       Composite.add(world,beam);
@@ -801,7 +803,20 @@
     });
 
     Events.on(engine,'collisionActive',ev=>{
-      ev.pairs.forEach(({bodyA,bodyB})=>tryContactInfection(bodyA,bodyB));
+      ev.pairs.forEach(({bodyA,bodyB})=>{
+        tryContactInfection(bodyA,bodyB);
+
+        // Prevent blob-on-blob contacts from acting like jump pads.
+        // They still collide and push each other, but upward transfer is damped.
+        if(bodyA.label==='blob' && bodyB.label==='blob'){
+          for(const b of [bodyA,bodyB]){
+            if(!b.personality || b.personality.dead || b.personality.infected) continue;
+            if(!hasWorldSupport(b) && b.velocity.y < -5.5){
+              Body.setVelocity(b,{x:b.velocity.x,y:b.velocity.y*0.72});
+            }
+          }
+        }
+      });
     });
 
     Events.on(engine,'afterUpdate',()=>{
@@ -831,7 +846,7 @@
       if(Math.random()<(p.infectionStage==='aggressive'?0.026:0.012)) addSickParticle(blob);
       // Infection does not jump to other blobs here. Spreading is handled only by
       // tryContactInfection() during collisionStart/collisionActive.
-      if(p.infection>=112 && !p.unkillableBlobzilla) markDead(blob,'virus');
+      if(p.infection>=112) markDead(blob,'virus');
     }
 
     function handleCrushing(blob){
@@ -933,14 +948,140 @@
       return chosen;
     }
 
+
+
+    function nearestQuietSpot(blob){
+      const samples=10;
+      let best={x:blob.position.x+Math.cos(blob.personality.wanderAngle||0)*140,y:canvas.height-blob.circleRadius-12,score:-Infinity};
+      for(let i=0;i<samples;i++){
+        const x=rand(canvas.width*0.08,canvas.width*0.92);
+        let nearest=Infinity;
+        for(const other of blobs){
+          if(other===blob || other.personality.dead) continue;
+          const d=Math.abs(other.position.x-x)+Math.abs(other.position.y-(canvas.height-blob.circleRadius-12))*0.25;
+          nearest=Math.min(nearest,d);
+        }
+        const wallPenalty=Math.min(x,canvas.width-x)*0.12;
+        const score=nearest+wallPenalty+rand(-35,35);
+        if(score>best.score) best={x,y:canvas.height-blob.circleRadius-12,score};
+      }
+      return best;
+    }
+
+    function applySocialSpacing(blob, now, grounded){
+      const p=blob.personality;
+      if(!p || p.dead || p.infected || p.fakeDead) return false;
+
+      const preferred = p.socialStyle==='loner' ? p.personalSpace*1.35 : p.socialStyle==='social' ? p.personalSpace*0.72 : p.personalSpace;
+      let crowdX=0, crowdCount=0, closest=null, closestD=Infinity;
+
+      for(const other of blobs){
+        if(other===blob || other.personality.dead || other.personality.infected) continue;
+        const delta=Vector.sub(blob.position,other.position);
+        const d=Vector.magnitude(delta);
+        if(d<closestD){ closest=other; closestD=d; }
+        if(d>0 && d<preferred){
+          const push=(preferred-d)/preferred;
+          crowdX += (delta.x/d)*push;
+          crowdCount++;
+        }
+      }
+
+      if(crowdCount>0){
+        p.crowdStress=clamp((p.crowdStress||0)+crowdCount*0.75,0,180);
+        if(closest && Math.random()<0.004*(p.socialStyle==='loner'?2.4:1)){
+          p.grudgeId=closest.id;
+          p.grudgeUntil=now+rand(3500,9000);
+        }
+      }else{
+        p.crowdStress=Math.max(0,(p.crowdStress||0)-0.8);
+      }
+
+      if(p.grudgeId && now < (p.grudgeUntil||0)){
+        const enemy=blobs.find(o=>o.id===p.grudgeId && !o.personality.dead);
+        if(enemy){
+          const away=Vector.normalise(Vector.sub(blob.position,enemy.position));
+          if(grounded){
+            applyGroundedMovement(blob,away.x,0,0.0022*(p.socialStyle==='loner'?1.35:1));
+          }
+          setBlobLook(blob,{x:enemy.position.x,y:enemy.position.y},'grudge',2,500,now);
+          return true;
+        }
+      }else{
+        p.grudgeId=null;
+      }
+
+      const wantsQuiet = p.socialStyle==='loner' || (p.crowdStress||0)>45;
+      if(wantsQuiet && now > (p.quietUntil||0) && Math.random()<0.0045){
+        p.quietTarget=nearestQuietSpot(blob);
+        p.quietUntil=now+rand(5500,13000);
+        p.exploreTargetKind=null; p.exploreTargetId=null; p.exploreTargetUntil=0;
+      }
+
+      if(p.quietTarget && now < (p.quietUntil||0)){
+        const dx=p.quietTarget.x-blob.position.x;
+        const dir=Math.sign(dx)||Math.cos(p.wanderAngle)||1;
+        if(grounded){
+          const far=Math.abs(dx)>45;
+          applyGroundedMovement(blob,dir,far && Math.random()<0.016 ? -0.0026 : 0,0.0019);
+        }
+        setBlobLook(blob,{x:p.quietTarget.x,y:blob.position.y-8},'quiet',2,700,now);
+        if(Math.abs(dx)<38){
+          p.restMode='sleeping';
+          p.restUntil=now+rand(2500,6500);
+          p.quietUntil=now+rand(5000,10000);
+        }
+        return true;
+      }
+
+      if(crowdCount>0 && grounded){
+        const pushDir = Math.sign(crowdX) || Math.cos(p.wanderAngle) || 1;
+        const strength=(p.socialStyle==='social'?0.00065:0.00155)*clamp(0.6+crowdCount*0.25,0.6,1.45);
+        applyGroundedMovement(blob,pushDir,0,strength);
+        return p.socialStyle!=='social' && crowdCount>1;
+      }
+
+      return false;
+    }
+
+    function hasWorldSupport(blob){
+      const r=blob.circleRadius;
+      // Floor support. The floor body sits just below the visible canvas bottom.
+      if(blob.position.y >= canvas.height - r - 6) return true;
+
+      // Beam top support. This intentionally ignores other blobs, so blobs can
+      // collide with each other but cannot use each other as jump platforms.
+      for(const beam of beams){
+        const bw=beam.plugin?.w || 200;
+        const bh=beam.plugin?.h || 20;
+        const rel=Vector.rotate(Vector.sub(blob.position,beam.position),-(beam.angle||0));
+        const withinX=Math.abs(rel.x) < bw/2 + r*0.72;
+        const topY=-bh/2;
+        const closeToTop=rel.y < topY && rel.y > topY - r*1.25 - 8;
+        if(withinX && closeToTop && blob.velocity.y >= -1.2) return true;
+      }
+      return false;
+    }
+
     function applyGroundedMovement(blob, directionX, hopForce, sideForce){
       const p=blob.personality;
       const r=blob.circleRadius;
       const nearLeft=blob.position.x < r+24;
       const nearRight=blob.position.x > canvas.width-r-24;
+      const worldSupported=hasWorldSupport(blob);
+
       // Avoid wall-sticking: never keep pushing into the side walls.
       if((nearLeft && directionX<0) || (nearRight && directionX>0)) directionX *= -0.45;
-      Body.applyForce(blob,blob.position,{x:directionX*sideForce,y:hopForce});
+
+      // Critical rule: blobs may collide with other blobs, but they cannot
+      // launch/jump from other blobs. Upward hop force only works from floor/beam support.
+      const safeHop = (hopForce < 0 && !worldSupported) ? 0 : hopForce;
+
+      // If they are in a blob pile without world support, reduce sideways impulse too.
+      // This keeps piles from turning into boost engines while preserving collision.
+      const sideScale = worldSupported ? 1 : 0.32;
+
+      Body.applyForce(blob,blob.position,{x:directionX*sideForce*sideScale,y:safeHop});
     }
 
     function handCuriosity(blob, now){
@@ -1026,6 +1167,53 @@
       };
     }
 
+
+    function blobCrowdingFactor(blob){
+      let crowd=0;
+      for(const other of blobs){
+        if(other===blob || other.personality.dead) continue;
+        const dx=Math.abs(other.position.x-blob.position.x);
+        const dy=Math.abs(other.position.y-blob.position.y);
+        if(dx < (blob.circleRadius+other.circleRadius)*1.15 && dy < (blob.circleRadius+other.circleRadius)*1.25){
+          crowd++;
+        }
+      }
+      return clamp(crowd/4,0,1);
+    }
+    function bonkCeilingIfNeeded(blob){
+      const p=blob.personality;
+      if(!p || p.dead) return false;
+      const r=blob.circleRadius;
+      let bonk=false;
+
+      // Actual top world boundary.
+      if(blob.position.y < r+18 && blob.velocity.y < 0) bonk=true;
+
+      // Underside of beams: convert blob position into beam-local space.
+      for(const beam of beams){
+        const bw=beam.plugin?.w || 200;
+        const bh=beam.plugin?.h || 20;
+        const rel=Vector.rotate(Vector.sub(blob.position,beam.position),-(beam.angle||0));
+        const withinX=Math.abs(rel.x) < bw/2 + r*0.78;
+        const justUnderBeam=rel.y > 0 && rel.y < bh/2 + r*1.12;
+        if(withinX && justUnderBeam && blob.velocity.y < 0.8){
+          bonk=true;
+          break;
+        }
+      }
+
+      if(bonk){
+        // Do not cap falling speed. Only stop the unnatural upward cling and
+        // give a small downward shove so they peel off the underside.
+        Body.setVelocity(blob,{x:blob.velocity.x*0.82,y:Math.max(blob.velocity.y,2.8)});
+        Body.applyForce(blob,blob.position,{x:0,y:0.0065*blob.mass});
+        p.agitation=Math.max(p.agitation,34);
+        p.scaredUntil=Math.max(p.scaredUntil||0,Date.now()+450);
+        return true;
+      }
+      return false;
+    }
+
     function portalThreat(blob, now){
       const p=blob.personality;
       if(p.dead || p.infected || p.fakeDead || now > portalFearUntil) return null;
@@ -1055,6 +1243,9 @@
       // Smaller/younger blobs are springier; older/bigger blobs become heavier and hop lower.
       const agility=clamp(1.38-(blob.circleRadius/70)-ageHeaviness,0.58,1.35);
       const jumpLimiter=p.infected?0.75:agility;
+      const grounded=hasWorldSupport(blob);
+      const crowding=blobCrowdingFactor(blob);
+      const jumpDampen=1-crowding*0.38; // prevents stacked blobs from boosting each other sky-high
 
       p.hunger=clamp(p.hunger+0.0008,0,1);
       const naturalMood=p.temperament==='joyful'?0.0009:(p.temperament==='timid'?-0.0004:0.0002);
@@ -1078,9 +1269,9 @@
         p.agitation=Math.max(p.agitation,100*p.fearfulness);
         p.scaredUntil=now+3000;
         p.mood=clamp(p.mood-0.025,0,1);
-        if(touching){
+        if(grounded){
           // Panic hop: mostly sideways with a capped jump, so it looks frantic without flying.
-          const panicHop=-0.0042*jumpLimiter*(1+0.35*p.fearfulness);
+          const panicHop=-0.0042*jumpLimiter*jumpDampen*(1+0.35*p.fearfulness);
           applyGroundedMovement(blob,-nearestInfected.dir.x,panicHop,0.0076*p.fearfulness);
         }
       }
@@ -1091,7 +1282,7 @@
         p.scaredUntil=now+4000;
         p.mood=0;
         const chasePower = p.infectionStage==='aggressive' ? 0.0032 : p.infectionStage==='sick' ? 0.0020 : 0.0012;
-        const hop = p.infectionStage==='aggressive' ? -0.0007 : 0;
+        const hop = p.infectionStage==='aggressive' ? -0.0007*jumpDampen : 0;
         applyGroundedMovement(blob,nearestHealthy.dir.x,hop*jumpLimiter,chasePower);
       }
 
@@ -1102,8 +1293,8 @@
         p.agitation=Math.max(p.agitation,82*p.fearfulness);
         p.scaredUntil=Math.max(p.scaredUntil||0, now+2600);
         p.mood=clamp(p.mood-0.012,0,1);
-        if(touching){
-          const panicHop=-0.0034*jumpLimiter*(0.75+0.28*p.fearfulness+0.22*portalDanger.strength);
+        if(grounded){
+          const panicHop=-0.0034*jumpLimiter*jumpDampen*(0.75+0.28*p.fearfulness+0.22*portalDanger.strength);
           const sideForce=0.0058*(0.72+0.5*portalDanger.strength)*p.fearfulness;
           applyGroundedMovement(blob,-portalDanger.dir.x,panicHop,sideForce);
         }
@@ -1116,14 +1307,16 @@
         p.agitation=Math.max(p.agitation,92*p.fearfulness);
         p.scaredUntil=Math.max(p.scaredUntil||0, now+2200);
         p.mood=clamp(p.mood-0.018,0,1);
-        if(touching){
-          const panicHop=-0.0038*jumpLimiter*(0.92+0.32*p.fearfulness+0.28*cursorDanger.strength);
+        if(grounded){
+          const panicHop=-0.0038*jumpLimiter*jumpDampen*(0.92+0.32*p.fearfulness+0.28*cursorDanger.strength);
           const sideForce=0.0069*(0.72+0.5*cursorDanger.strength)*p.fearfulness;
           applyGroundedMovement(blob,-cursorDanger.dir.x,panicHop,sideForce);
         }
       }
 
-      const handTarget = (!nearestInfected && !portalDanger && !cursorDanger) ? handCuriosity(blob, now) : null;
+      const socialBusy = (!nearestInfected && !portalDanger && !cursorDanger) ? applySocialSpacing(blob, now, grounded) : false;
+
+      const handTarget = (!socialBusy && !nearestInfected && !portalDanger && !cursorDanger) ? handCuriosity(blob, now) : null;
       if(handTarget){
         setBlobLook(blob,{x:mouse.position.x, y:mouse.position.y},'hand',4,420,now);
         // The hand is more interesting than beams/portals. It can interrupt
@@ -1136,10 +1329,10 @@
         const handStrength = handTarget.strength ?? 0.5;
         p.mood=clamp(p.mood+0.0012*handStrength,0,1);
         p.agitation=Math.max(p.agitation,12+18*handStrength);
-        if(touching){
+        if(grounded){
           const reachUp = handTarget.verticalGap > blob.circleRadius*1.2;
           const reachIntensity = clamp(handTarget.verticalGap/360,0,1);
-          const jump = reachUp ? -(0.0038+0.0028*reachIntensity)*jumpLimiter*clamp(0.45+handStrength,0.45,1.2) : (Math.random()<0.012*handStrength ? -0.0024*jumpLimiter : 0);
+          const jump = reachUp ? -(0.0038+0.0028*reachIntensity)*jumpLimiter*jumpDampen*clamp(0.45+handStrength,0.45,1.2) : (Math.random()<0.012*handStrength ? -0.0024*jumpLimiter*jumpDampen : 0);
           const side = handTarget.dist < 70 ? 0.00065 : 0.0032*clamp(p.curiosity,0.65,1.55)*clamp(0.35+handStrength,0.35,1.0);
           applyGroundedMovement(blob,handTarget.dir.x,jump,side);
         }
@@ -1165,8 +1358,8 @@
         const dx=(p.restTargetX??blob.position.x)-blob.position.x;
         setBlobLook(blob,{x:(p.restTargetX??blob.position.x), y:blob.position.y-6},'rest',2,720,now);
         const dirToRest=Math.sign(dx)||Math.cos(p.wanderAngle)||1;
-        if(touching){
-          applyGroundedMovement(blob,dirToRest,Math.random()<0.018?-0.0028*jumpLimiter:0,0.00145);
+        if(grounded){
+          applyGroundedMovement(blob,dirToRest,Math.random()<0.018?-0.0028*jumpLimiter*jumpDampen:0,0.00145);
         }
         if(Math.abs(dx)<42 || now-(p.restStartedAt||now)>9000){
           p.restMode='sleeping';
@@ -1191,7 +1384,7 @@
 
       // Idle/exploration behavior. Curiosity only applies while grounded/touching,
       // so blobs cannot steer or change direction in mid-air.
-      const curiousTarget = !handTarget && !portalDanger && !restingNow && !p.infected && !nearestInfected ? chooseInterestingStructure(blob, now) : null;
+      const curiousTarget = !socialBusy && !handTarget && !portalDanger && !restingNow && !p.infected && !nearestInfected ? chooseInterestingStructure(blob, now) : null;
       if(curiousTarget){
         setBlobLook(blob,{x:curiousTarget.target.x, y:curiousTarget.target.y},curiousTarget.kind,3,700,now);
         const toTarget=Vector.sub(curiousTarget.target,blob.position);
@@ -1216,27 +1409,29 @@
           }
         }
 
-        if(touching){
+        if(grounded){
           // Beam = playground, portal = cautious curiosity. Both are grounded movement only.
           const sideForce=(isBeam?0.0027:0.0018)*clamp(p.curiosity,0.55,1.45);
-          const hopForce=isBeam ? -0.0035*jumpLimiter : (close ? -0.0018*jumpLimiter : -0.0011*jumpLimiter);
+          const hopForce=isBeam ? -0.0035*jumpLimiter*jumpDampen : (close ? -0.0018*jumpLimiter*jumpDampen : -0.0011*jumpLimiter*jumpDampen);
           applyGroundedMovement(blob,targetDir.x,hopForce,sideForce);
 
           if(close && isBeam && Math.random()<0.016){
             // Occasional playful hop, but never airborne steering.
-            applyGroundedMovement(blob,Math.cos(p.wanderAngle),-0.0048*jumpLimiter,0.0018);
+            applyGroundedMovement(blob,Math.cos(p.wanderAngle),-0.0048*jumpLimiter*jumpDampen,0.0018);
           }
           if(close && !isBeam && Math.random()<0.012){
             p.agitation=Math.max(p.agitation,22*p.fearfulness);
-            applyGroundedMovement(blob,targetDir.x,-0.0018*jumpLimiter,0.0011);
+            applyGroundedMovement(blob,targetDir.x,-0.0018*jumpLimiter*jumpDampen,0.0011);
           }
         }
-      }else if(touching && !p.infected){
+      }else if(grounded && !p.infected){
         // No current item target: roam instead of sitting still. Some wander solo, some cluster.
         const friend=blobs.find(o=>o!==blob&&!o.personality.dead&&!o.personality.infected&&Vector.magnitude(Vector.sub(o.position,blob.position))<180);
         let roamX=Math.cos(p.wanderAngle);
-        if(friend && p.loneliness>0.48 && Math.random()<0.55){
+        if(friend && p.socialStyle==='social' && p.loneliness>0.62 && Math.random()<0.36){
           roamX=Vector.normalise(Vector.sub(friend.position,blob.position)).x;
+        }else if(friend && p.socialStyle==='loner' && Math.random()<0.45){
+          roamX=-Vector.normalise(Vector.sub(friend.position,blob.position)).x;
         }
         // If there are structures in the world, occasionally bias the wander angle toward a different one.
         if((beams.length || portalA || portalB) && Math.random()<0.012){
@@ -1246,24 +1441,24 @@
             roamX=Vector.normalise(Vector.sub(pick.target,blob.position)).x;
           }
         }
-        setBlobLook(blob,friend && p.loneliness>0.48 ? {x:friend.position.x, y:friend.position.y} : {x:blob.position.x + roamX*80, y:blob.position.y-8}, friend && p.loneliness>0.48 ? 'friend' : 'wander', 1, 650,now);
+        setBlobLook(blob,friend && p.socialStyle==='social' && p.loneliness>0.62 ? {x:friend.position.x, y:friend.position.y} : {x:blob.position.x + roamX*80, y:blob.position.y-8}, friend && p.socialStyle==='social' && p.loneliness>0.62 ? 'friend' : 'wander', 1, 650,now);
         const hopChance=p.interestBias==='wander'?0.035:0.022;
         if(Math.random()<hopChance/(1+sizeFactor*0.35)){
-          applyGroundedMovement(blob,roamX,-0.0045*jumpLimiter,0.0025*(0.75+p.curiosity*0.45));
+          applyGroundedMovement(blob,roamX,-0.0045*jumpLimiter*jumpDampen,0.0025*(0.75+p.curiosity*0.45));
         }else if(Math.random()<0.075){
           applyGroundedMovement(blob,roamX,0,0.0016*(0.75+p.curiosity*0.35));
         }
       }
 
       // If a blob is trying to move through other blobs, let the small/young ones hop over the pile.
-      if(!restingNow && touching && !p.infected && Math.random()<0.030){
+      if(!restingNow && grounded && !p.infected && Math.random()<0.030){
         const forward={x:Math.cos(p.wanderAngle),y:0};
         const blocked=blobs.some(o=>{
           if(o===blob||o.personality.dead) return false;
           const rel=Vector.sub(o.position,blob.position);
           return Math.abs(rel.x)<blob.circleRadius*3.2 && rel.y>-blob.circleRadius*0.8 && rel.y<blob.circleRadius*2.2 && Math.sign(rel.x||forward.x)===Math.sign(forward.x);
         });
-        if(blocked){ applyGroundedMovement(blob,forward.x,-0.0064*jumpLimiter,0.0026); }
+        if(blocked){ applyGroundedMovement(blob,forward.x,-0.0064*jumpLimiter*jumpDampen,0.0026); }
       }
 
       // Cursor/hand attraction is handled only by handCuriosity(), which has a local notice radius.
@@ -1289,6 +1484,9 @@
       }else{
         // No max velocity for healthy blobs: throws, falls, and portal loops are allowed to become dangerous.
       }
+
+      // If they hit the underside of a beam/top wall while jumping, make them fall back down.
+      bonkCeilingIfNeeded(blob);
 
       // Extra anti-wall-stick guard: if they are pressing into a side wall, bleed horizontal speed.
       if((blob.position.x<blob.circleRadius+12 && blob.velocity.x<0) ||
