@@ -159,7 +159,7 @@
         temperament:Math.random()<0.22?'timid':(Math.random()<0.48?'joyful':'balanced'),
         fearfulness:rand(0.6,1.4),cheerfulness:rand(0.35,1),bravery:rand(0.55,1.35),
         heldEmotion:'neutral',heldSince:0,wasThrownAt:0,lastReleaseSpeed:0,
-        wanderAngle:rand(0,Math.PI*2),wanderTimer:Math.floor(rand(30,240)),squish:0,panicSource:null,
+        wanderAngle:rand(0,Math.PI*2),wanderTimer:Math.floor(rand(30,240)),roamDir:Math.random()<0.5?-1:1,roamUntil:0,roamStuckSince:0,lastRoamX:null,nextBuddyHopAt:0,buddyHopLockUntil:0,squish:0,panicSource:null,
         friendId:null,loneliness:rand(0,1),curiosity:rand(0.3,1.4),
         lookAt:null,lookTarget:null,lookTargetKind:null,lookPriority:0,lookLockUntil:0,lookSmooth:{x:0,y:0},lookSleep:false,
         interestBias:Math.random()<0.45?'beams':(Math.random()<0.55?'portals':'wander'),
@@ -787,6 +787,72 @@
     }
 
 
+
+    function maybeBuddyHop(a,b,now=Date.now()){
+      if(!a?.personality || !b?.personality) return;
+      const pa=a.personality, pb=b.personality;
+      if(pa.dead || pb.dead || pa.infected || pb.infected) return;
+      if(pa.restMode==='sleeping' || pb.restMode==='sleeping') return;
+
+      const aGround=hasWorldSupport(a);
+      const bGround=hasWorldSupport(b);
+      if(!aGround && !bGround) return;
+
+      const rel=Vector.sub(b.position,a.position);
+      const horizontal=Math.abs(rel.x);
+      const vertical=Math.abs(rel.y);
+      const closeEnough=horizontal < (a.circleRadius+b.circleRadius)*0.85 && vertical < (a.circleRadius+b.circleRadius)*0.75;
+      if(!closeEnough) return;
+
+      const relSpeed=Vector.magnitude(Vector.sub(a.velocity,b.velocity));
+      const bothSlow=Math.abs(a.velocity.x)<1.15 && Math.abs(b.velocity.x)<1.15 && relSpeed<3.2;
+      if(!bothSlow) return;
+
+      // Pick exactly one blob to hop. The other gets a short lockout so they
+      // don't jump into each other at the same time.
+      let jumper, blocker;
+      if(aGround && !bGround){ jumper=a; blocker=b; }
+      else if(bGround && !aGround){ jumper=b; blocker=a; }
+      else{
+        const aReady=now>(pa.nextBuddyHopAt||0) && now>(pa.buddyHopLockUntil||0);
+        const bReady=now>(pb.nextBuddyHopAt||0) && now>(pb.buddyHopLockUntil||0);
+        if(!aReady && !bReady) return;
+        if(aReady && !bReady){ jumper=a; blocker=b; }
+        else if(bReady && !aReady){ jumper=b; blocker=a; }
+        else{
+          // Smaller/livelier blob usually hops over; tie-breaker alternates by id.
+          jumper = a.circleRadius <= b.circleRadius ? a : b;
+          blocker = jumper===a ? b : a;
+        }
+      }
+
+      const pj=jumper.personality, pk=blocker.personality;
+      if(now < (pj.nextBuddyHopAt||0) || now < (pj.buddyHopLockUntil||0)) return;
+
+      const awayX=Math.sign(jumper.position.x-blocker.position.x) || (Math.random()<0.5?-1:1);
+      const energy=energyMovementScale(jumper);
+      const sizeFactor=clamp(1.25 - jumper.circleRadius/80,0.55,1.15);
+      const debtPenalty=needsSleepFocus(jumper)?0.55:1;
+
+      // One clear hop plus a sideways nudge away/over the other blob.
+      Body.applyForce(jumper,jumper.position,{
+        x:awayX*0.0032*energy*sizeFactor,
+        y:-0.0062*energy*sizeFactor*debtPenalty
+      });
+
+      pj.nextBuddyHopAt=now+rand(1400,2600);
+      pj.buddyHopLockUntil=now+500;
+      pk.buddyHopLockUntil=now+rand(850,1500);
+      pk.nextBuddyHopAt=Math.max(pk.nextBuddyHopAt||0,now+rand(900,1700));
+
+      pj.roamDir=awayX;
+      pj.roamUntil=now+rand(2200,4800);
+      pk.roamDir=-awayX;
+      pk.roamUntil=now+rand(1600,3600);
+      setBlobLook(jumper,{x:jumper.position.x+awayX*90,y:jumper.position.y-20},'buddy-hop',2,600,now);
+    }
+
+
     /* Collision bookkeeping */
     function tryContactInfection(a,b){
       if(!a||!b||a.label!=='blob'||b.label!=='blob') return;
@@ -829,6 +895,7 @@
           const hard=relSpeed>5.2;
           if(bodyA.personality?.restMode==='sleeping') wakeSleepingBlob(bodyA,hard?'hard-bump':'bump');
           if(bodyB.personality?.restMode==='sleeping') wakeSleepingBlob(bodyB,hard?'hard-bump':'bump');
+          maybeBuddyHop(bodyA,bodyB,Date.now());
         }
         if((other===portalA||other===portalB)){
           const target= other===portalA?portalB:portalA; if(!target) return;
@@ -866,6 +933,7 @@
             if(bodyA.personality?.restMode==='sleeping') wakeSleepingBlob(bodyA,relSpeed>5.2?'hard-bump':'bump');
             if(bodyB.personality?.restMode==='sleeping') wakeSleepingBlob(bodyB,relSpeed>5.2?'hard-bump':'bump');
           }
+          maybeBuddyHop(bodyA,bodyB,Date.now());
           for(const b of [bodyA,bodyB]){
             if(!b.personality || b.personality.dead || b.personality.infected) continue;
             if(!hasWorldSupport(b) && b.velocity.y < -5.5){
@@ -1623,6 +1691,9 @@
       p.exploreBoredUntil=now+rand(1600,3200);
       const away = beam ? Math.sign(blob.position.x-beam.position.x)||Math.sign(Math.cos(p.wanderAngle))||1 : Math.sign(Math.cos(p.wanderAngle))||1;
       p.wanderAngle = away>0 ? rand(-0.35,0.35) : Math.PI+rand(-0.35,0.35);
+      p.roamDir=away;
+      p.roamUntil=now+rand(4500,9000);
+      p.lastRoamX=blob.position.x;
       if(hasWorldSupport(blob)){
         applyGroundedMovement(blob,away,-0.0018*energyMovementScale(blob),0.0032);
       }
@@ -1641,9 +1712,53 @@
       p.blockedOnTargetSince=0;
       p.stuckTimer=0;
       p.wanderAngle += Math.PI + rand(-0.8,0.8);
+      p.roamDir=Math.sign(Math.cos(p.wanderAngle))||p.roamDir||1;
+      p.roamUntil=now+rand(3500,8000);
+      p.lastRoamX=blob.position.x;
     }
 
 
+
+
+    function chooseRoamDirection(blob, now, reason='normal'){
+      const p=blob.personality;
+      let dir=p.roamDir || (Math.random()<0.5?-1:1);
+
+      // Avoid choosing a direction that immediately pushes into a wall.
+      if(blob.position.x < blob.circleRadius+55) dir=1;
+      else if(blob.position.x > canvas.width-blob.circleRadius-55) dir=-1;
+      else if(reason==='stuck') dir*=-1;
+      else if(Math.random()<0.36) dir*=-1;
+
+      p.roamDir=dir;
+      p.wanderAngle = dir>0 ? rand(-0.28,0.28) : Math.PI+rand(-0.28,0.28);
+      p.roamUntil=now+rand(2800,7200);
+      p.roamStuckSince=0;
+      p.lastRoamX=blob.position.x;
+      return dir;
+    }
+
+    function committedRoamDirection(blob, now){
+      const p=blob.personality;
+      if(!p.roamUntil || now>p.roamUntil){
+        return chooseRoamDirection(blob, now, 'normal');
+      }
+
+      const moved=Math.abs(blob.position.x-(p.lastRoamX ?? blob.position.x));
+      if(moved<1.2 && Math.abs(blob.velocity.x)<0.18){
+        p.roamStuckSince=p.roamStuckSince||now;
+      }else{
+        p.roamStuckSince=0;
+        p.lastRoamX=blob.position.x;
+      }
+
+      // If it has been wiggling in place for ~1.4 seconds, force a new direction.
+      if(p.roamStuckSince && now-p.roamStuckSince>1400){
+        return chooseRoamDirection(blob, now, 'stuck');
+      }
+
+      return p.roamDir || chooseRoamDirection(blob, now, 'normal');
+    }
 
     function preventGroundFreeze(blob, now, grounded){
       const p=blob.personality;
@@ -1661,14 +1776,10 @@
       // If the blob has become passive while awake, give it a tiny life pulse.
       // This is not cursor attraction and not mid-air steering; it only happens
       // when grounded and awake, so they keep feeling alive without needing the hand.
-      if(speed < 0.08 && !hasAttention){
-        if(!p.idleNudgeUntil || now > p.idleNudgeUntil){
-          p.wanderAngle += rand(-1.4,1.4);
-          p.idleNudgeUntil = now + rand(900,2200);
-        }
-        const dir=Math.sign(Math.cos(p.wanderAngle)) || (Math.random()<0.5?-1:1);
-        Body.applyForce(blob,blob.position,{x:dir*0.00095*energyMovementScale(blob),y:0});
-        setBlobLook(blob,{x:blob.position.x+dir*80,y:blob.position.y-8},'idle',1,900,now);
+      if(speed < 0.12 && !hasAttention){
+        const dir=committedRoamDirection(blob, now);
+        Body.applyForce(blob,blob.position,{x:dir*0.0018*energyMovementScale(blob),y:0});
+        setBlobLook(blob,{x:blob.position.x+dir*100,y:blob.position.y-8},'idle',1,900,now);
       }
 
       // If it is pressed against another blob/structure and not moving, wiggle sideways a little.
@@ -1865,35 +1976,31 @@
         if(grounded){
           const reachUp = handTarget.verticalGap > blob.circleRadius*0.75;
           const reachIntensity = clamp((handTarget.verticalGap-blob.circleRadius*0.6)/260,0,1);
-          const horizontalNeed = clamp(Math.abs(handTarget.horizontalGap)/180,0.18,1);
-          const closeUnderHand = Math.abs(handTarget.horizontalGap) < blob.circleRadius*2.2 && handTarget.verticalGap > 24;
+          const horizontalNeed = clamp(Math.abs(handTarget.horizontalGap)/190,0,1);
+          const dirX = Math.sign(handTarget.horizontalGap) || Math.sign(Math.cos(p.wanderAngle||0)) || 1;
 
-          // Commit to a clear reach-jump, but use a short cooldown so they do
-          // not jitter-hop every single frame under the cursor.
-          let jump=0;
+          // Cursor reach is a jump, not a continuous sideways shove. Use a direct
+          // velocity impulse so they actually leave the ground instead of skating.
           if(reachUp && now > (p.nextCursorLeapAt||0)){
-            // Big expressive reach jump toward the hand. This is intentionally
-            // much stronger than normal wandering/beam jumps.
-            const baseReach = 0.0160 + 0.0120*reachIntensity;
-            jump = -baseReach * jumpLimiter * jumpDampen * clamp(0.72+handStrength*0.55,0.72,1.18);
-            p.nextCursorLeapAt = now + rand(520,980);
-            p.cursorReachUntil = now + 1100;
-          }else if(!reachUp && Math.random()<0.006*handStrength){
-            jump = -0.0038*jumpLimiter*jumpDampen;
+            const jumpVel = -(6.75 + 8.25*reachIntensity) * clamp(0.82+handStrength*0.35,0.82,1.15) * clamp(jumpDampen,0.62,1);
+            const sideVel = dirX * (1.8 + 5.0*horizontalNeed) * clamp(0.55+handStrength,0.55,1.0);
+
+            Body.setVelocity(blob,{
+              x:clamp(blob.velocity.x*0.35 + sideVel,-8.5,8.5),
+              y:Math.min(blob.velocity.y,jumpVel)
+            });
+
+            p.nextCursorLeapAt = now + rand(650,1150);
+            p.cursorReachUntil = now + 1150;
+            p.roamDir=dirX;
+            p.roamUntil=now+rand(1400,2600);
+          }else{
+            // Gentle positioning while waiting for the next leap. This is capped
+            // so they don't floor-slide at silly speeds.
+            const desiredX = dirX * (1.2 + 2.2*horizontalNeed);
+            const vx = blob.velocity.x + (desiredX-blob.velocity.x)*0.045;
+            Body.setVelocity(blob,{x:clamp(vx,-4.2,4.2),y:blob.velocity.y});
           }
-
-          // Stronger sideways intent when the hand is off-center; gentle when directly above.
-          let side = (closeUnderHand ? 0.0018 : 0.0054*horizontalNeed) * clamp(p.curiosity,0.65,1.45) * clamp(0.45+handStrength,0.45,1.0);
-
-          // If they are directly under the hand, add a tiny sideways choice so
-          // they do not just jiggle in place, but keep it subtle.
-          let dirX = handTarget.dir.x;
-          if(Math.abs(handTarget.horizontalGap)<10){
-            dirX = Math.sign(Math.cos(p.wanderAngle||0)) || (Math.random()<0.5?-1:1);
-            side *= 0.42;
-          }
-
-          applyGroundedMovement(blob,dirX,jump,side);
         }
       }
 
@@ -2027,11 +2134,13 @@
       }else if(!sleepFocus && grounded && !p.infected){
         // No current item target: roam instead of sitting still. Some wander solo, some cluster.
         const friend=blobs.find(o=>o!==blob&&!o.personality.dead&&!o.personality.infected&&Vector.magnitude(Vector.sub(o.position,blob.position))<180);
-        let roamX=Math.cos(p.wanderAngle);
-        if(friend && p.socialStyle==='social' && p.loneliness>0.62 && Math.random()<0.36){
+        let roamX=committedRoamDirection(blob, now);
+        if(friend && p.socialStyle==='social' && p.loneliness>0.62 && Math.random()<0.22){
           roamX=Vector.normalise(Vector.sub(friend.position,blob.position)).x;
-        }else if(friend && p.socialStyle==='loner' && Math.random()<0.45){
+          p.roamDir=Math.sign(roamX)||p.roamDir||1;
+        }else if(friend && p.socialStyle==='loner' && Math.random()<0.32){
           roamX=-Vector.normalise(Vector.sub(friend.position,blob.position)).x;
+          p.roamDir=Math.sign(roamX)||p.roamDir||1;
         }
         // If there are structures in the world, occasionally bias the wander angle toward a different one.
         if((beams.length || portalA || portalB) && Math.random()<0.012){
@@ -2044,9 +2153,13 @@
         }
         setBlobLook(blob,friend && p.socialStyle==='social' && p.loneliness>0.62 ? {x:friend.position.x, y:friend.position.y} : {x:blob.position.x + roamX*80, y:blob.position.y-8}, friend && p.socialStyle==='social' && p.loneliness>0.62 ? 'friend' : 'wander', 1, 650,now);
         const hopChance=p.interestBias==='wander'?0.035:0.022;
+        // Keep roaming gently even when nothing special is nearby.
+        // This prevents the tiny indecisive wiggle where they appear stuck.
+        applyGroundedMovement(blob,roamX,0,0.00105*(0.75+p.curiosity*0.35));
+
         if(Math.random()<hopChance/(1+sizeFactor*0.35)){
-          applyGroundedMovement(blob,roamX,-0.0045*jumpLimiter*jumpDampen,0.0025*(0.75+p.curiosity*0.45));
-        }else if(Math.random()<0.115){
+          applyGroundedMovement(blob,roamX,-0.0042*jumpLimiter*jumpDampen,0.0022*(0.75+p.curiosity*0.45));
+        }else if(Math.random()<0.075){
           applyGroundedMovement(blob,roamX,0,0.0018*(0.75+p.curiosity*0.35));
         }
       }
@@ -2076,9 +2189,13 @@
       // should keep their real momentum. Zombie movement still gets a small horizontal cap below.
       if(p.infected && blob.velocity.y < -8){ Body.setVelocity(blob,{x:blob.velocity.x,y:-8}); }
 
-      if(now < (p.cursorReachUntil||0) && !p.infected && blob.velocity.y < -32){
-        // Cursor reach jumps should be expressive but still have a safety cap.
-        Body.setVelocity(blob,{x:blob.velocity.x,y:-32});
+      if(now < (p.cursorReachUntil||0) && !p.infected){
+        // Cursor reach jumps should be expressive but controlled.
+        const vy = blob.velocity.y < -16 ? -16 : blob.velocity.y;
+        const vx = clamp(blob.velocity.x,-9,9);
+        if(vx!==blob.velocity.x || vy!==blob.velocity.y){
+          Body.setVelocity(blob,{x:vx,y:vy});
+        }
       }
 
       if(p.infected){
@@ -2091,10 +2208,16 @@
         // No max velocity for healthy blobs: throws, falls, and portal loops are allowed to become dangerous.
       }
 
+      if(grounded && !p.infected && now < (p.cursorReachUntil||0) && Math.abs(blob.velocity.x)>9){
+        Body.setVelocity(blob,{x:Math.sign(blob.velocity.x)*9,y:blob.velocity.y});
+      }
+
       // Extra anti-wall-stick guard: if they are pressing into a side wall, bleed horizontal speed.
       if((blob.position.x<blob.circleRadius+12 && blob.velocity.x<0) ||
          (blob.position.x>canvas.width-blob.circleRadius-12 && blob.velocity.x>0)){
         Body.setVelocity(blob,{x:blob.velocity.x*0.35,y:blob.velocity.y});
+        p.roamDir = blob.position.x < canvas.width/2 ? 1 : -1;
+        p.roamUntil = now+rand(2500,5200);
       }
 
       if(now>p.nextBlink){ p.blinkUntil=now+rand(120,260); p.nextBlink=now+rand(1800,7000); }
