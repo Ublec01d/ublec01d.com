@@ -155,7 +155,7 @@
       return {
         age:0,ageOffset:Math.floor(Math.random()*600),scared:false,agitation:0,trauma:0,
         fakeDead:false,dead:false,infected:false,infectious:false,infection:0,infectionStage:'healthy',infectionPulse:0,sterile:false,
-        crushed:0,hunger:rand(0,1),mood:rand(0,1),energy:rand(0.72,1),tired:false,sleepDebt:0,sleepInterrupted:0,forcedSleeps:0,emergencySleep:false,splitFaceUntil:0,blinkUntil:0,nextBlink:Date.now()+rand(1200,6000),
+        crushed:0,hunger:rand(0,1),mood:rand(0,1),energy:rand(0.72,1),tired:false,sleepDebt:0,sleepInterrupted:0,forcedSleeps:0,emergencySleep:false,splitFaceUntil:0,nextCursorLeapAt:0,cursorReachUntil:0,blinkUntil:0,nextBlink:Date.now()+rand(1200,6000),
         temperament:Math.random()<0.22?'timid':(Math.random()<0.48?'joyful':'balanced'),
         fearfulness:rand(0.6,1.4),cheerfulness:rand(0.35,1),bravery:rand(0.55,1.35),
         heldEmotion:'neutral',heldSince:0,wasThrownAt:0,lastReleaseSpeed:0,
@@ -1263,6 +1263,7 @@
       return {
         dist:distance,
         dir:Vector.normalise(toHand),
+        horizontalGap:mouse.position.x-blob.position.x,
         verticalGap:blob.position.y-mouse.position.y,
         strength
       };
@@ -1862,11 +1863,37 @@
         p.mood=clamp(p.mood+0.0012*handStrength,0,1);
         p.agitation=Math.max(p.agitation,12+18*handStrength);
         if(grounded){
-          const reachUp = handTarget.verticalGap > blob.circleRadius*1.2;
-          const reachIntensity = clamp(handTarget.verticalGap/360,0,1);
-          const jump = reachUp ? -(0.0038+0.0028*reachIntensity)*jumpLimiter*jumpDampen*clamp(0.45+handStrength,0.45,1.2) : (Math.random()<0.012*handStrength ? -0.0024*jumpLimiter*jumpDampen : 0);
-          const side = handTarget.dist < 70 ? 0.00065 : 0.0032*clamp(p.curiosity,0.65,1.55)*clamp(0.35+handStrength,0.35,1.0);
-          applyGroundedMovement(blob,handTarget.dir.x,jump,side);
+          const reachUp = handTarget.verticalGap > blob.circleRadius*0.75;
+          const reachIntensity = clamp((handTarget.verticalGap-blob.circleRadius*0.6)/260,0,1);
+          const horizontalNeed = clamp(Math.abs(handTarget.horizontalGap)/180,0.18,1);
+          const closeUnderHand = Math.abs(handTarget.horizontalGap) < blob.circleRadius*2.2 && handTarget.verticalGap > 24;
+
+          // Commit to a clear reach-jump, but use a short cooldown so they do
+          // not jitter-hop every single frame under the cursor.
+          let jump=0;
+          if(reachUp && now > (p.nextCursorLeapAt||0)){
+            // Big expressive reach jump toward the hand. This is intentionally
+            // much stronger than normal wandering/beam jumps.
+            const baseReach = 0.0160 + 0.0120*reachIntensity;
+            jump = -baseReach * jumpLimiter * jumpDampen * clamp(0.72+handStrength*0.55,0.72,1.18);
+            p.nextCursorLeapAt = now + rand(520,980);
+            p.cursorReachUntil = now + 1100;
+          }else if(!reachUp && Math.random()<0.006*handStrength){
+            jump = -0.0038*jumpLimiter*jumpDampen;
+          }
+
+          // Stronger sideways intent when the hand is off-center; gentle when directly above.
+          let side = (closeUnderHand ? 0.0018 : 0.0054*horizontalNeed) * clamp(p.curiosity,0.65,1.45) * clamp(0.45+handStrength,0.45,1.0);
+
+          // If they are directly under the hand, add a tiny sideways choice so
+          // they do not just jiggle in place, but keep it subtle.
+          let dirX = handTarget.dir.x;
+          if(Math.abs(handTarget.horizontalGap)<10){
+            dirX = Math.sign(Math.cos(p.wanderAngle||0)) || (Math.random()<0.5?-1:1);
+            side *= 0.42;
+          }
+
+          applyGroundedMovement(blob,dirX,jump,side);
         }
       }
 
@@ -2048,6 +2075,11 @@
       // No vertical velocity cap for healthy blobs. Throws, falls, and portal loops
       // should keep their real momentum. Zombie movement still gets a small horizontal cap below.
       if(p.infected && blob.velocity.y < -8){ Body.setVelocity(blob,{x:blob.velocity.x,y:-8}); }
+
+      if(now < (p.cursorReachUntil||0) && !p.infected && blob.velocity.y < -32){
+        // Cursor reach jumps should be expressive but still have a safety cap.
+        Body.setVelocity(blob,{x:blob.velocity.x,y:-32});
+      }
 
       if(p.infected){
         // Keep zombie movement slow horizontally only. Falling physics stays normal.
