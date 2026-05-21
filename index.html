@@ -3,34 +3,54 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Ublec01d — fixed‑timestep + beams</title>
+  <title>Ublec01d — blob sandbox UI icons v11</title>
   <style>
     html,body{margin:0;padding:0;overflow:hidden;background:#000;color:#fff;font-family:"Segoe UI",sans-serif}
     canvas{display:block}
     #ui{position:absolute;top:10px;left:10px;background:transparent;padding:10px;border-radius:10px;pointer-events:none}
-    #ui button{background:transparent;border:none;color:grey;font-family:"Courier New",monospace;font-size:1.1em;font-weight:bold;text-shadow:0 0 3px #000;padding:4px 10px;margin:3px 0;cursor:pointer;transition:background .2s,color .2s;pointer-events:auto}
+    #ui button{background:transparent;border:none;color:grey;font-family:"Courier New",monospace;font-size:1.1em;font-weight:bold;text-shadow:0 0 3px #000;padding:4px 10px;margin:3px 0;cursor:var(--cursor-hand,grab);transition:background .2s,color .2s;pointer-events:auto}
+    #ui, #ui button, #ui .speed-group{cursor:var(--cursor-hand,grab)}
+    body.pointer-down #ui, body.pointer-down #ui button, body.pointer-down #ui .speed-group{cursor:var(--cursor-pinch,grabbing)}
     #ui button:hover{background:lime;color:#000;border-radius:4px}
+    #ui button.tool-icon{position:relative;min-width:44px;width:44px;height:38px;border:1px solid rgba(255,255,255,.18);border-radius:8px;font-size:1.35em;line-height:1;display:inline-flex;align-items:center;justify-content:center;padding:0;margin:3px 0;vertical-align:middle}
+    #ui button.tool-icon.active{background:lime;color:#000;box-shadow:0 0 14px lime;border-color:lime}
+    #ui button.tool-icon .tool-symbol{display:inline-block;line-height:1}
+    #ui button.tool-icon.danger.active{background:#ff4444;color:#000;box-shadow:0 0 14px #ff4444;border-color:#ff4444}
+    #ui button.tool-icon.delete-active{background:#ff4444;color:#000;box-shadow:0 0 14px #ff4444;border-color:#ff4444}
+    #ui button.tool-icon.virus-flash{background:#551616;color:#ff7777;box-shadow:0 0 14px #ff3333;border-color:#ff5555}
+    .tool-column{display:inline-flex;flex-direction:column;gap:6px;pointer-events:auto}
+    .tool-pair{display:flex;gap:8px;align-items:center}
+    .speed-group{display:inline-flex;align-items:center;gap:6px;margin:3px 0;padding:0 4px;color:grey;font-family:'Courier New',monospace;font-weight:bold;text-shadow:0 0 3px #000}
+    .speed-label{font-size:.95em;line-height:1;min-width:48px;text-align:center;pointer-events:none}
+    #ui button.tool-icon.speed-icon{font-size:1.55em}
     #scoreboard{font-family:monospace;font-size:17px;margin-top:8px}
   </style>
 </head>
 <body>
   <canvas id="world"></canvas>
   <div id="ui" style="position:absolute;top:10px;left:10px;display:inline-flex;flex-direction:column;gap:6px;pointer-events:none">
-    <div style="display:flex;gap:10px;pointer-events:auto">
-      <button onclick="spawnBlob()">Spawn Blob</button>
-      <button onclick="toggleDeathTouch()" id="deathToggle">Death Touch: Off</button>
-      <button onclick="clearBlobs()">Wipe out Blobs</button>
-      <button onclick="changeSpeed(-0.1)">− Speed</button>
-      <button onclick="changeSpeed(0.1)">＋ Speed</button>
-      <button onclick="window.location.href='dev.html'">Dev</button>
+    <div style="display:flex;gap:10px;pointer-events:auto;align-items:center">
+      <button onclick="spawnBlob()" id="spawnBlobBtn" class="tool-icon" title="Spawn Blob" aria-label="Spawn Blob"><span class="tool-symbol">🟢</span></button>
+      <button onclick="toggleDeathTouch()" id="deathToggle" class="tool-icon danger" title="Death Touch" aria-label="Death Touch"><span class="tool-symbol">☠️</span></button>
+      <button onclick="releaseBlobVirus()" id="virusBtn" class="tool-icon danger" title="Release Blob Virus" aria-label="Release Blob Virus"><span class="tool-symbol">☣️</span></button>
+      <div class="speed-group" aria-label="Speed controls">
+        <button onclick="changeSpeed(-0.1)" id="speedDownBtn" class="tool-icon speed-icon" title="Decrease Speed" aria-label="Decrease Speed"><span class="tool-symbol">−</span></button>
+        <span class="speed-label">Speed</span>
+        <button onclick="changeSpeed(0.1)" id="speedUpBtn" class="tool-icon speed-icon" title="Increase Speed" aria-label="Increase Speed"><span class="tool-symbol">+</span></button>
+      </div>
+      <button onclick="window.location.href='dev.html'" id="devBtn" class="tool-icon" title="Dev" aria-label="Dev"><span class="tool-symbol">⚙️</span></button>
     </div>
-    <div style="display:flex;gap:10px;pointer-events:auto">
-      <button onclick="toggleBeamMode()" id="beamToggle">Beam: Off</button>
-      <button onclick="togglePortalGun()" id="portalToggle">Portal Gun: Off</button>
-      <button onclick="clearPortals()">Clear Portals</button>
-     <!-- <button onclick="clearBeams()">Clear Beams</button> -->
-      <button onclick="rotateSelected('left')">⟲ Rotate Left</button>
-      <button onclick="rotateSelected('right')">⟳ Rotate Right</button>
+    <div id="toolRow" style="display:flex;gap:10px;pointer-events:auto;align-items:flex-start">
+      <div class="tool-column" aria-label="Build tools">
+        <div class="tool-pair">
+          <button onclick="spawnBeamTool()" id="beamTool" class="tool-icon" title="Spawn Beam" aria-label="Spawn Beam"><span class="tool-symbol">▭</span></button>
+          <button onclick="togglePortalGun()" id="portalToggle" class="tool-icon" title="Portal Gun" aria-label="Portal Gun"><span class="tool-symbol">🌀</span></button>
+        </div>
+        <div class="tool-pair">
+          <button onclick="toggleDeleteTool()" id="deleteTool" class="tool-icon danger" title="Delete Beam or Portal" aria-label="Delete Beam or Portal"><span class="tool-symbol">✕</span></button>
+        </div>
+      </div>
+      <span id="buildHint" style="color:#777;font-family:'Courier New',monospace;font-size:.95em;align-self:center">▭ spawn beam • 🌀 place portals • ✕ delete beam/portal • select beam to show handles</span>
     </div>
     <div id="scoreboard" style="margin-top:8px;pointer-events:none">
       <p>Spawned: <span id="stat-spawned">0</span></p>
@@ -78,13 +98,14 @@
     ]);
 
     /* State */
-    const blobs=[], ghosts=[], beams=[];
-    const inPortal=new WeakSet();
+    const blobs=[], ghosts=[], beams=[], particles=[];
     let heldBlob=null, selected=null, dragging=null;
+    let dragStart=null, dragOffset=null, buildGhost=null, buildAngle=0, portalFlip=false, dragMode=null;
     let portalA=null, portalB=null;
-    let portalGunActive=false, beamMode=false, deathTouchActive=false;
+    let portalGunActive=false, beamMode=false, deathTouchActive=false, deleteToolActive=false;
 
     const stats={spawned:0,split:0,zilla:0,dead:0};
+    let virusFlashTimer=null;
     const updateHUD=()=>{
       for(const k in stats){ const el=document.getElementById(`stat-${k}`); if(el) el.textContent=stats[k]; }
       document.getElementById('stat-alive').textContent=blobs.filter(b=>!b.personality.dead).length;
@@ -92,10 +113,247 @@
 
     /* Helpers */
     const greenTint=r=>`rgb(100,${Math.max(100,255-Math.floor(r*2.5))},120)`;
+    function infectedTint(r,stage='sick'){
+      if(stage==='exposed') return `rgb(${Math.min(235,135+Math.floor(r*1.3))},${Math.max(95,145-Math.floor(r*0.7))},${Math.max(95,120-Math.floor(r*0.3))})`;
+      if(stage==='aggressive') return `rgb(${Math.min(255,185+Math.floor(r*1.8))},${Math.max(35,75-Math.floor(r*0.8))},${Math.max(45,75-Math.floor(r*0.5))})`;
+      if(stage==='terminal') return `rgb(${Math.min(150,95+Math.floor(r*0.6))},${Math.max(25,45-Math.floor(r*0.2))},${Math.max(30,55-Math.floor(r*0.2))})`;
+      return `rgb(${Math.min(255,155+Math.floor(r*1.4))},${Math.max(55,105-Math.floor(r*0.8))},${Math.max(55,95-Math.floor(r*0.4))})`;
+    }
+    const rand=(min,max)=>min+Math.random()*(max-min);
+    const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
+    function makePersonality(extra={}){
+      return {
+        age:0,ageOffset:Math.floor(Math.random()*600),scared:false,agitation:0,trauma:0,
+        fakeDead:false,dead:false,infected:false,infectious:false,infection:0,infectionStage:'healthy',infectionPulse:0,sterile:false,
+        crushed:0,hunger:rand(0,1),mood:rand(0,1),blinkUntil:0,nextBlink:Date.now()+rand(1200,6000),
+        temperament:Math.random()<0.22?'timid':(Math.random()<0.48?'joyful':'balanced'),
+        fearfulness:rand(0.6,1.4),cheerfulness:rand(0.35,1),bravery:rand(0.55,1.35),
+        heldEmotion:'neutral',heldSince:0,wasThrownAt:0,lastReleaseSpeed:0,
+        wanderAngle:rand(0,Math.PI*2),wanderTimer:Math.floor(rand(30,240)),squish:0,panicSource:null,
+        friendId:null,loneliness:rand(0,1),curiosity:rand(0.3,1.4),
+        lookAt:null,lookTarget:null,lookTargetKind:null,lookPriority:0,lookLockUntil:0,lookSmooth:{x:0,y:0},lookSleep:false,
+        interestBias:Math.random()<0.45?'beams':(Math.random()<0.55?'portals':'wander'),
+        exploreCooldownUntil:0,lastInterestingKind:null,exploreTargetKind:null,exploreTargetId:null,exploreTargetUntil:0,
+        exploreBoredUntil:0,stuckTimer:0,lastExploreX:null,
+        portalSpin:0,portalAvoidUntil:0,portalTrips:0,
+        restMode:null,restTargetX:null,restUntil:0,restCooldownUntil:Date.now()+rand(5000,16000),restStartedAt:0,
+        unkillableBlobzilla:Math.random()<0.01,touching:new Set(),...extra
+      };
+    }
+    function tunePersonality(p){
+      if(p.temperament==='timid'){ p.fearfulness*=1.45; p.bravery*=0.65; p.mood*=0.55; }
+      if(p.temperament==='joyful'){ p.cheerfulness*=1.35; p.fearfulness*=0.8; p.mood=Math.max(p.mood,0.7); }
+      return p;
+    }
+    function createBlob(x,y,r,extraPersonality={}){
+      const personality=tunePersonality(makePersonality(extraPersonality));
+      const blob=Bodies.circle(x,y,r,{ restitution:0.12, friction:0.65, frictionStatic:0.9, frictionAir:0.0012, density:0.0012, label:'blob', collisionFilter:{category:0x0001}, render:{fillStyle:personality.infected?infectedTint(r):greenTint(r)} });
+      blob.circleRadius=r;
+      blob.personality=personality;
+      return blob;
+    }
+    function addSickParticle(blob){
+      particles.push({x:blob.position.x+rand(-blob.circleRadius,blob.circleRadius),y:blob.position.y+rand(-blob.circleRadius,blob.circleRadius),vx:rand(-0.25,0.25),vy:rand(-1.2,-0.2),r:rand(2,5),life:rand(500,1200),start:Date.now(),kind:'sick'});
+    }
+    function infectBlob(blob,source=null){
+      const p=blob?.personality; if(!p||p.dead||p.infected) return false;
+      p.infected=true; p.infectious=true; p.sterile=true; p.infection=source?rand(12,28):35; p.infectionStage='exposed'; p.scared=true; p.agitation=Math.max(p.agitation,120); p.scaredUntil=Date.now()+60000; p.mood=0; p.heldEmotion='scared';
+      blob.render.fillStyle=infectedTint(blob.circleRadius,p.infectionStage);
+      for(let i=0;i<6;i++) addSickParticle(blob);
+      return true;
+    }
 
-    /* Beam helpers */
-    function placeBeam(x,y,w=200,h=20){ const beam=Bodies.rectangle(x,y,w,h,{isStatic:true,label:'beam',render:{fillStyle:'#777'}}); beams.push(beam); Composite.add(world,beam);} 
-    function toggleBeamMode(){ beamMode=!beamMode; const b=document.getElementById('beamToggle'); b.textContent=`Beam: ${beamMode?'On':'Off'}`; b.style.color=beamMode?'lime':'grey'; if(beamMode&&portalGunActive) togglePortalGun(); }
+
+    function setIconButton(btn, symbol){
+      if(!btn) return;
+      btn.innerHTML = `<span class="tool-symbol">${symbol}</span>`;
+    }
+
+    /* Canvas cursors */
+    // Use the browser/Windows-style open hand and closed-grab hand everywhere.
+    // No emoji cursor here; this keeps the cursor consistent over the canvas and UI buttons.
+    const CURSOR_HAND = 'grab';
+    const CURSOR_PINCH = 'grabbing';
+    const CURSOR_DELETE = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cline x1='6' y1='6' x2='22' y2='22' stroke='%23ff3333' stroke-width='4' stroke-linecap='round'/%3E%3Cline x1='22' y1='6' x2='6' y2='22' stroke='%23ff3333' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E") 14 14, not-allowed`;
+    let pointerDown=false;
+    document.documentElement.style.setProperty('--cursor-hand', CURSOR_HAND);
+    document.documentElement.style.setProperty('--cursor-pinch', CURSOR_PINCH);
+    function updateCanvasCursor(){
+      document.body.classList.toggle('pointer-down', pointerDown);
+      if(deleteToolActive) canvas.style.cursor = CURSOR_DELETE;
+      else if(pointerDown || heldBlob || dragging) canvas.style.cursor = CURSOR_PINCH;
+      else canvas.style.cursor = CURSOR_HAND;
+    }
+    window.addEventListener('mousedown',()=>{ pointerDown=true; noteHandActivity(12000); updateCanvasCursor(); });
+    window.addEventListener('mouseup',()=>{ pointerDown=false; updateCanvasCursor(); });
+    window.addEventListener('mouseleave',()=>{ pointerDown=false; updateCanvasCursor(); });
+    window.addEventListener('touchstart',()=>{ pointerDown=true; noteHandActivity(); updateCanvasCursor(); },{passive:true});
+    window.addEventListener('touchend',()=>{ pointerDown=false; updateCanvasCursor(); },{passive:true});
+    window.addEventListener('touchcancel',()=>{ pointerDown=false; updateCanvasCursor(); },{passive:true});
+
+    // The hand/cursor is the most interesting thing in the world. Blobs will
+    // investigate it for a while after movement/clicks, but still only steer
+    // while grounded so they cannot change direction mid-air.
+    let handActiveUntil = Date.now()+4500;
+    let cursorThreatUntil = 0;
+    let cursorThreatPos = {x:canvas.width/2,y:canvas.height/2};
+    let portalFearUntil = 0;
+    let portalFearPos = null;
+    function noteHandActivity(duration=9000){ handActiveUntil = Date.now()+duration; }
+    function triggerCursorFear(pos, duration=9000, sourceBlob=null){
+      cursorThreatUntil = Date.now()+duration;
+      cursorThreatPos = {x:pos?.x ?? mouse.position.x, y:pos?.y ?? mouse.position.y};
+      blobs.forEach(b=>{
+        if(!b || b===sourceBlob) return;
+        const p=b.personality;
+        if(!p || p.dead || p.infected) return;
+        p.scared=true;
+        p.panicSource='cursor';
+        p.agitation=Math.max(p.agitation,110*p.fearfulness);
+        p.scaredUntil=Math.max(p.scaredUntil||0, Date.now()+duration);
+        p.mood=clamp((p.mood||0)-0.08,0,1);
+      });
+    }
+    function triggerPortalFear(pos, duration=12000, sourceBlob=null){
+      portalFearUntil = Date.now()+duration;
+      portalFearPos = pos ? {x:pos.x,y:pos.y} : null;
+      blobs.forEach(b=>{
+        if(!b || b===sourceBlob) return;
+        const p=b.personality;
+        if(!p || p.dead || p.infected) return;
+        p.scared=true;
+        p.panicSource='portal';
+        p.agitation=Math.max(p.agitation,95*p.fearfulness);
+        p.scaredUntil=Math.max(p.scaredUntil||0, Date.now()+duration);
+        p.exploreBoredUntil=Math.max(p.exploreBoredUntil||0, Date.now()+duration);
+        p.portalTraumaUntil=Math.max(p.portalTraumaUntil||0, Date.now()+duration);
+        p.exploreTargetKind=null;
+        p.exploreTargetId=null;
+        p.exploreTargetUntil=0;
+        p.mood=clamp((p.mood||0)-0.05,0,1);
+      });
+    }
+    canvas.addEventListener('mousemove',()=>noteHandActivity(),{passive:true});
+    canvas.addEventListener('touchmove',()=>noteHandActivity(),{passive:true});
+    canvas.addEventListener('mouseenter',()=>noteHandActivity(6500),{passive:true});
+
+    function setDeleteToolActive(active){
+      deleteToolActive=!!active;
+      const btn=document.getElementById('deleteTool');
+      if(btn){
+        setIconButton(btn,'✕');
+        btn.classList.toggle('active',deleteToolActive);
+        btn.classList.toggle('delete-active',deleteToolActive);
+        btn.style.color=deleteToolActive?'#000':'grey';
+      }
+      updateCanvasCursor();
+      // Prevent the Matter mouse constraint from grabbing blobs while using the delete tool.
+      if(typeof mc !== 'undefined') mc.collisionFilter.mask=deleteToolActive?0:0x0001;
+      updateBuildHint(deleteToolActive?'✕ Delete mode: click a beam or portal to remove it. Click ✕ again to cancel.':'▭ spawn beam • 🌀 place portals • ✕ delete beam/portal • select beam to show handles');
+    }
+    function toggleDeleteTool(){
+      if(portalGunActive) setPortalGunActive(false);
+      beamMode=false;
+      setDeleteToolActive(!deleteToolActive);
+    }
+    window.toggleDeleteTool=toggleDeleteTool;
+
+    function removeStructure(body){
+      if(!body) return false;
+      if(body.label==='beam'){
+        const i=beams.indexOf(body);
+        if(i>=0) beams.splice(i,1);
+        Composite.remove(world,body);
+      }else if(body===portalA || body.label==='portalA'){
+        Composite.remove(world,body);
+        if(body===portalA) portalA=null;
+      }else if(body===portalB || body.label==='portalB'){
+        Composite.remove(world,body);
+        if(body===portalB) portalB=null;
+      }else{
+        return false;
+      }
+      if(selected===body) selected=null;
+      if(dragging===body) dragging=null;
+      if(buildGhost===body) buildGhost=null;
+      return true;
+    }
+
+    function structureAtPoint(pos){
+      const bodies=interactiveBodies();
+      for(let i=bodies.length-1;i>=0;i--){
+        const body=bodies[i];
+        if(body.label==='beam'){
+          if(Query.point([body],pos).length) return body;
+          // A little forgiveness around the drawn rectangle.
+          const rel=Vector.rotate(Vector.sub(pos,body.position),-(body.angle||0));
+          const w=body.plugin?.w||200, h=body.plugin?.h||20;
+          if(Math.abs(rel.x)<=w/2+8 && Math.abs(rel.y)<=h/2+8) return body;
+        }else if(isPortal(body)){
+          const rel=Vector.rotate(Vector.sub(pos,body.position),-(body.angle||0));
+          // Match the visible oval/ring more closely than the invisible sensor rectangle.
+          const oval=(rel.x*rel.x)/(32*32)+(rel.y*rel.y)/(64*64);
+          if(oval<=1.25 || dist(pos,portalRotateHandle(body))<18) return body;
+        }
+      }
+      return null;
+    }
+
+    /* Structure helpers */
+    function updateBuildHint(text){ const el=document.getElementById('buildHint'); if(el) el.textContent=text; }
+    function placeBeam(x,y,w=200,h=20,angle=0){
+      const beam=Bodies.rectangle(x,y,w,h,{isStatic:true,label:'beam',angle,render:{visible:false,fillStyle:'transparent'}});
+      beam.plugin={kind:'beam',stress:0,spawnGlow:Date.now(),w,h}; beams.push(beam); Composite.add(world,beam); selected=beam; return beam;
+    }
+    function setPortalGunActive(active){
+      portalGunActive=!!active;
+      beamMode=false; // legacy beam tool mode is permanently disabled; beam button only spawns a beam.
+      if(portalGunActive && deleteToolActive) setDeleteToolActive(false);
+      const portalBtn=document.getElementById('portalToggle');
+      if(portalBtn){
+        setIconButton(portalBtn,'🌀');
+        portalBtn.classList.toggle('active',portalGunActive);
+        portalBtn.style.color=portalGunActive?'#000':'grey';
+      }
+      const beamBtn=document.getElementById('beamTool');
+      if(beamBtn){
+        setIconButton(beamBtn,'▭');
+        beamBtn.classList.remove('active');
+        beamBtn.style.color='grey';
+      }
+      updateBuildHint(portalGunActive?'🌀 Portal active: drag on the canvas to place/aim portals. It switches off after portal 2.':'▭ spawn beam • 🌀 place portals • ✕ delete beam/portal');
+    }
+    function replaceBeam(oldBeam,x,y,w,h,angle,keepSelected=true){
+      const idx=beams.indexOf(oldBeam);
+      const stress=oldBeam?.plugin?.stress||0;
+      Composite.remove(world,oldBeam);
+      const beam=Bodies.rectangle(x,y,w,h,{isStatic:true,label:'beam',angle,render:{visible:false,fillStyle:'transparent'}});
+      beam.plugin={kind:'beam',stress,spawnGlow:oldBeam?.plugin?.spawnGlow||Date.now(),w,h};
+      if(idx>=0) beams[idx]=beam; else beams.push(beam);
+      Composite.add(world,beam);
+      if(keepSelected){ selected=beam; dragging=beam; }
+      return beam;
+    }
+    function clearBeams(){ beams.splice(0).forEach(b=>Composite.remove(world,b)); if(selected?.label==='beam') selected=null; }
+    window.clearBeams=clearBeams;
+    function spawnBeamTool(){
+      // Beam is not a toggle: each click drops one selected beam near the middle.
+      beamMode=false;
+      if(deleteToolActive) setDeleteToolActive(false);
+      if(portalGunActive) setPortalGunActive(false);
+      const btn=document.getElementById('beamTool');
+      if(btn){ setIconButton(btn,'▭'); btn.classList.remove('active'); btn.style.color='grey'; }
+      const spreadX=Math.min(canvas.width*0.22,220);
+      const spreadY=Math.min(canvas.height*0.18,150);
+      const x=canvas.width/2+rand(-spreadX,spreadX);
+      const y=canvas.height*0.42+rand(-spreadY,spreadY);
+      const angle=rand(-0.28,0.28);
+      const len=170+Math.random()*70;
+      selected=placeBeam(x,y,len,20,angle);
+      updateBuildHint('Beam spawned: it is selected now. Drag body to move, end dots to stretch, top handle / wheel / Q/E to rotate.');
+    }
+    window.spawnBeamTool=spawnBeamTool;
+    function toggleBeamMode(){ spawnBeamTool(); }
     window.toggleBeamMode=toggleBeamMode;
 
     /* Fear */
@@ -103,109 +361,1015 @@
 
     /* Blob factory */
     function spawnBlob(x=Math.random()*canvas.width,y=Math.random()*canvas.height/2,r=10+Math.random()*8){
-      const blob=Bodies.circle(x,y,r,{ restitution:0.2, frictionAir:0.005, label:'blob', collisionFilter:{category:0x0001}, render:{fillStyle:greenTint(r)} });
-      blob.circleRadius=r;
-      blob.personality={age:0,ageOffset:Math.floor(Math.random()*600),scared:false,agitation:0,trauma:0,fakeDead:false,unkillableBlobzilla:Math.random()<0.01,touching:new Set()};
+      const blob=createBlob(x,y,r);
       blobs.push(blob); Composite.add(world,blob);
       stats.spawned++; if(blob.personality.unkillableBlobzilla) stats.zilla++; updateHUD();
     }
     window.spawnBlob=spawnBlob;
 
-    function markDead(blob){ if(blob.personality.dead) return; if(blob.personality.unkillableBlobzilla) stats.zilla=Math.max(0,stats.zilla-1); blob.personality.dead=true; blob.personality.deathTime=Date.now(); blob.render.fillStyle='#666'; stats.dead++; updateHUD(); }
-    function clearBlobs(){ [...blobs].forEach((b,i)=>setTimeout(()=>{ markDead(b); spreadFear(b,10000); b.personality.trauma=2000; },i*120)); }
+    function markDead(blob,cause='unknown'){
+      if(blob.personality.dead) return;
+      if(blob.personality.unkillableBlobzilla) stats.zilla=Math.max(0,stats.zilla-1);
+      const p=blob.personality;
+      p.dead=true;
+      p.deathCause=cause;
+      p.deathTime=Date.now();
+      // Dead infected blobs are corpses, not active virus carriers.
+      // This prevents a killed zombie/corpse from continuing to infect through collisionActive.
+      p.infected=false;
+      p.infectious=false;
+      p.infection=0;
+      p.infectionStage='dead';
+      p.contactVirusFrames=0;
+      if(p.touching) p.touching.clear();
+      blob.render.fillStyle=cause==='virus'?'#4b1c24':cause==='crushed'?'#333':'#666';
+      stats.dead++; updateHUD();
+    }
+    function releaseBlobVirus(){
+      const candidates=blobs.filter(b=>!b.personality.dead&&!b.personality.infected);
+      const btn=document.getElementById('virusBtn');
+      if(!candidates.length){
+        if(btn){
+          setIconButton(btn,'☣️');
+          btn.title='No healthy blobs to infect';
+          btn.classList.add('virus-flash');
+          btn.style.color='#999';
+          clearTimeout(virusFlashTimer);
+          virusFlashTimer=setTimeout(()=>{ btn.classList.remove('virus-flash'); btn.title='Release Blob Virus'; btn.style.color='grey'; setIconButton(btn,'☣️'); },900);
+        }
+        return;
+      }
+      // One-shot release: pressing the button infects exactly one patient zero.
+      // After that, the virus can only continue through real blob-to-blob contact.
+      const patientZero=candidates[Math.floor(Math.random()*candidates.length)];
+      infectBlob(patientZero);
+      spreadFear(patientZero,12000);
+      if(btn){
+        setIconButton(btn,'☣️');
+        btn.title='Virus released';
+        btn.classList.add('virus-flash');
+        btn.style.color='#ff5555';
+        clearTimeout(virusFlashTimer);
+        virusFlashTimer=setTimeout(()=>{ btn.classList.remove('virus-flash'); btn.title='Release Blob Virus'; btn.style.color='grey'; setIconButton(btn,'☣️'); },900);
+      }
+    }
+    window.releaseBlobVirus=releaseBlobVirus;
+    function clearBlobs(){ releaseBlobVirus(); }
     window.clearBlobs=clearBlobs;
 
     /* Portal helpers */
-    function placePortal(x,y,isBlue){
-      const p=Bodies.rectangle(x,y,20,80,{isSensor:true,isStatic:true,angle:isBlue?0:Math.PI,label:isBlue?'portalA':'portalB',render:{fillStyle:isBlue?'#1b75d1':'#ff6a00'}});
+    function placePortal(x,y,isBlue,angle=isBlue?0:Math.PI){
+      const p=Bodies.rectangle(x,y,24,92,{isSensor:true,isStatic:true,angle,label:isBlue?'portalA':'portalB',render:{visible:false,fillStyle:'transparent'}});
+      p.plugin={kind:'portal',isBlue,spawnGlow:Date.now()};
       if(isBlue){ if(portalA) Composite.remove(world,portalA); portalA=p; }
       else      { if(portalB) Composite.remove(world,portalB); portalB=p; }
-      Composite.add(world,p);
-      // auto‑disable portal gun once both portals are placed
-      if(portalA && portalB && portalGunActive){ togglePortalGun(); }
+      Composite.add(world,p); selected=p;
+      if(portalGunActive && portalA && portalB){ setPortalGunActive(false); }
+      return p;
     }
-    function togglePortalGun(){ portalGunActive=!portalGunActive; const btn=document.getElementById('portalToggle'); btn.textContent=`Portal Gun: ${portalGunActive?'On':'Off'}`; btn.style.color=portalGunActive?'lime':'grey'; if(portalGunActive&&beamMode) toggleBeamMode(); }
+    function togglePortalGun(){
+      beamMode=false;
+      setPortalGunActive(!portalGunActive);
+    }
     window.togglePortalGun=togglePortalGun;
-    window.clearPortals=()=>{ if(portalA) Composite.remove(world,portalA); if(portalB) Composite.remove(world,portalB); portalA=portalB=null; };
+    window.clearPortals=()=>{ if(portalA) Composite.remove(world,portalA); if(portalB) Composite.remove(world,portalB); portalA=portalB=null; setPortalGunActive(false); };
 
     /* Rotation */
-    function rotateSelected(dir){ if(selected) Body.rotate(selected,(dir==='left'?-1:1)*Math.PI/18); }
+    function rotateSelected(dir){ if(selected&&(selected.label==='beam'||selected.label==='portalA'||selected.label==='portalB')) Body.rotate(selected,(dir==='left'?-1:1)*Math.PI/18); }
     window.rotateSelected=rotateSelected;
 
     /* Death‑Touch */
-    window.toggleDeathTouch=()=>{ deathTouchActive=!deathTouchActive; const b=document.getElementById('deathToggle'); b.textContent=`Death Touch: ${deathTouchActive?'On':'Off'}`; b.style.color=deathTouchActive?'lime':'grey'; };
+    window.toggleDeathTouch=()=>{ deathTouchActive=!deathTouchActive; const b=document.getElementById('deathToggle'); if(b){ setIconButton(b,'☠️'); b.classList.toggle('active',deathTouchActive); b.title=deathTouchActive?'Death Touch active':'Death Touch'; b.style.color=deathTouchActive?'#000':'grey'; } };
 
     /* Input setup */
     const mouse=Mouse.create(canvas);
     const mc=MouseConstraint.create(engine,{ mouse, constraint:{ stiffness:0.2,render:{visible:false}}, collisionFilter:{mask:0x0001} });
     Composite.add(world,mc); render.mouse=mouse;
 
+    function interactiveBodies(){ return [portalA,portalB,...beams].filter(Boolean); }
+    function isPortal(body){ return body && (body.label==='portalA'||body.label==='portalB'); }
+    function isStructure(body){ return body && (body.label==='beam'||isPortal(body)); }
+    function dist(a,b){ return Math.hypot(a.x-b.x,a.y-b.y); }
+    function portalRotateHandle(body){
+      const normal=Vector.rotate({x:1,y:0},body.angle);
+      return Vector.add(body.position,Vector.mult(normal,72));
+    }
+    function beamRotateHandle(body){
+      const normal=Vector.rotate({x:0,y:-1},body.angle);
+      return Vector.add(body.position,Vector.mult(normal,58));
+    }
+    function beamEndHandles(body){
+      const len=body.plugin?.w || Math.hypot(body.vertices[1].x-body.vertices[0].x,body.vertices[1].y-body.vertices[0].y);
+      const axis=Vector.rotate({x:1,y:0},body.angle);
+      return [
+        Vector.add(body.position,Vector.mult(axis,-len/2)),
+        Vector.add(body.position,Vector.mult(axis, len/2))
+      ];
+    }
+    function rotateHandle(body){ return isPortal(body)?portalRotateHandle(body):beamRotateHandle(body); }
+    function hitStructureControl(pos){
+      const bodies=interactiveBodies();
+      // Selected beam exposes stretch handles. Unselected beams only have their body selectable.
+      for(let i=bodies.length-1;i>=0;i--){
+        const body=bodies[i];
+        if(body.label!=='beam' || (selected!==body && dragging!==body && buildGhost!==body)) continue;
+        const [a,b]=beamEndHandles(body);
+        if(dist(pos,a)<18) return {body,mode:'stretchA'};
+        if(dist(pos,b)<18) return {body,mode:'stretchB'};
+      }
+      // Rotation handles only count while that structure is selected, dragged, or being placed.
+      for(let i=bodies.length-1;i>=0;i--){
+        const body=bodies[i];
+        if(selected!==body && dragging!==body && buildGhost!==body) continue;
+        const h=rotateHandle(body);
+        if(dist(pos,h)<18) return {body,mode:'rotate'};
+      }
+      // Body/centre drag moves/selects the structure.
+      for(let i=bodies.length-1;i>=0;i--){
+        const body=bodies[i];
+        if(Query.point([body],pos).length || dist(pos,body.position)<18) return {body,mode:'move'};
+      }
+      return null;
+    }
+    function setStructureFromDrag(body,start,pos){
+      if(!body||!start) return;
+      const dx=pos.x-start.x, dy=pos.y-start.y;
+      if(Math.abs(dx)+Math.abs(dy)<6) return;
+      const angle=Math.atan2(dy,dx);
+      Body.setAngle(body,angle);
+      if(body.label==='beam'){
+        const length=clamp(Math.hypot(dx,dy)*2,80,620);
+        replaceBeam(body,start.x,start.y,length,body.plugin?.h||20,angle,true);
+        buildGhost=dragging=selected;
+      }
+    }
+    function beginStructurePlacement(pos,type){
+      dragStart={...pos};
+      if(type==='beam') buildGhost=placeBeam(pos.x,pos.y,140,20,buildAngle);
+      if(type==='portal'){
+        const isBlue=!portalA || (portalA&&portalB&&portalFlip);
+        buildGhost=placePortal(pos.x,pos.y,isBlue,buildAngle+(isBlue?0:Math.PI));
+        portalFlip=!isBlue;
+      }
+      dragging=buildGhost; selected=buildGhost;
+    }
+
     /* Pointer handler */
     function handlePointer(pos){
-      if(beamMode) { placeBeam(pos.x,pos.y); return; }
-      if(portalGunActive){ placePortal(pos.x,pos.y,!portalA); return; }
-      selected = Query.point([portalA,portalB,...beams].filter(Boolean),pos)[0] || null;
-      Query.point(blobs,pos).forEach(b=>{ if(deathTouchActive){ markDead(b); spreadFear(b); } else if(!b.personality.dead){ heldBlob=b; b.personality.fakeDead=true; Body.setInertia(b,Infinity);} });
+      if(deleteToolActive){
+        const target=structureAtPoint(pos);
+        if(target){
+          removeStructure(target);
+          updateBuildHint('✕ Deleted. Delete mode stays active; click another beam/portal or press ✕ again to cancel.');
+        }
+        return;
+      }
+      if(beamMode) { beamMode=false; spawnBeamTool(); return; }
+      if(portalGunActive){ beginStructurePlacement(pos,'portal'); return; }
+
+      // IMPORTANT: structure handles live outside the Matter body.
+      // If we clear selection here before startDrag() runs, clicking the
+      // beam rotation handle instantly deselects the beam and rotation never starts.
+      // So when the pointer is on an active structure control, leave selection alone
+      // and let startDrag() decide the drag mode.
+      if(hitStructureControl(pos)) return;
+
+      selected = Query.point(interactiveBodies(),pos)[0] || null;
+      Query.point(blobs,pos).forEach(b=>{
+        if(deathTouchActive){
+          const wasHealthy = !b.personality.infected && !b.personality.dead;
+          markDead(b,'touch');
+          spreadFear(b);
+          if(wasHealthy) triggerCursorFear(pos, 9500, b);
+        }
+        else if(!b.personality.dead){
+          heldBlob=b;
+          b.personality.fakeDead=true;
+          b.personality.heldSince=Date.now();
+          b.personality.heldEmotion=b.personality.temperament==='joyful' && !b.personality.scared && !b.personality.infected ? 'joyful' : 'scared';
+          b.personality.agitation=Math.max(b.personality.agitation,35*b.personality.fearfulness);
+          Body.setInertia(b,Infinity);
+          updateCanvasCursor();
+        }
+      });
     }
     canvas.addEventListener('mousedown',()=>handlePointer(mouse.position));
     canvas.addEventListener('touchstart',e=>{ const t=e.touches[0]; handlePointer({x:t.clientX,y:t.clientY}); },{passive:false});
 
-    /* Dragging */
-    const startDrag=pos=>{ dragging = Query.point([portalA,portalB,...beams].filter(Boolean),pos)[0] || null; selected=dragging; };
+    /* Dragging structures */
+    const startDrag=pos=>{
+      if(deleteToolActive) return;
+      if(portalGunActive) return;
+      const hit=hitStructureControl(pos);
+      dragging = hit ? hit.body : null;
+      dragMode = hit ? hit.mode : null;
+      selected=dragging||selected;
+      dragStart=dragging?{...pos}:null;
+      dragOffset=dragging?{x:dragging.position.x-pos.x,y:dragging.position.y-pos.y}:null;
+      updateCanvasCursor();
+    };
     canvas.addEventListener('mousedown',()=>startDrag(mouse.position));
     canvas.addEventListener('touchstart',e=>{ const t=e.touches[0]; startDrag({x:t.clientX,y:t.clientY}); },{passive:false});
-    canvas.addEventListener('mousemove',e=>{ if(dragging) Body.setPosition(dragging,{x:e.clientX,y:e.clientY}); });
-    canvas.addEventListener('touchmove',e=>{ if(dragging){ const t=e.touches[0]; Body.setPosition(dragging,{x:t.clientX,y:t.clientY}); } },{passive:false});
-    const stopDrag=()=>{ dragging=null; };
+    function dragTo(pos){
+      if(!dragging) return;
+      if(buildGhost){
+        // Placement mode: click + drag defines initial beam length/portal facing.
+        setStructureFromDrag(buildGhost,dragStart,pos);
+      }
+      else if(dragStart && isStructure(dragging)){
+        if(dragMode==='rotate'){
+          const a=Math.atan2(pos.y-dragging.position.y,pos.x-dragging.position.x);
+          Body.setAngle(dragging,isPortal(dragging)?a:a+Math.PI/2);
+        } else if(dragging.label==='beam' && (dragMode==='stretchA'||dragMode==='stretchB')){
+          const axis=Vector.rotate({x:1,y:0},dragging.angle);
+          const len=dragging.plugin?.w || Math.hypot(dragging.vertices[1].x-dragging.vertices[0].x,dragging.vertices[1].y-dragging.vertices[0].y);
+          const fixedSign=dragMode==='stretchA'?1:-1;
+          const fixedEnd=Vector.add(dragging.position,Vector.mult(axis,fixedSign*len/2));
+          const vx=pos.x-fixedEnd.x, vy=pos.y-fixedEnd.y;
+          const rawLen=Math.abs(vx*axis.x+vy*axis.y);
+          const newLen=clamp(rawLen,80,700);
+          const movingSign=dragMode==='stretchA'?-1:1;
+          const newCenter=Vector.add(fixedEnd,Vector.mult(axis,movingSign*newLen/2));
+          dragging=replaceBeam(dragging,newCenter.x,newCenter.y,newLen,dragging.plugin?.h||20,dragging.angle,true);
+          dragMode=dragMode; selected=dragging;
+        } else {
+          // Move mode: preserve the original grab offset so the centre never snaps to the cursor.
+          const off=dragOffset||{x:0,y:0};
+          Body.setPosition(dragging,{x:pos.x+off.x,y:pos.y+off.y});
+        }
+      }
+    }
+    canvas.addEventListener('mousemove',e=>dragTo({x:e.clientX,y:e.clientY}));
+    canvas.addEventListener('touchmove',e=>{ const t=e.touches[0]; dragTo({x:t.clientX,y:t.clientY}); },{passive:false});
+    const stopDrag=()=>{
+      const placedGhost=buildGhost;
+      if(placedGhost && isPortal(placedGhost) && portalA && portalB){
+        setPortalGunActive(false);
+    updateCanvasCursor();
+      }
+      dragging=null; dragStart=null; dragOffset=null; buildGhost=null; dragMode=null;
+      // After placing a beam, hide its editor handles until the user selects it again.
+      if(placedGhost && placedGhost.label==='beam') selected=null;
+      updateCanvasCursor();
+    };
     canvas.addEventListener('mouseup',stopDrag);
     canvas.addEventListener('touchend',stopDrag);
     canvas.addEventListener('touchcancel',stopDrag);
+    canvas.addEventListener('wheel',e=>{ if(selected&&(selected.label==='beam'||selected.label==='portalA'||selected.label==='portalB')){ e.preventDefault(); Body.rotate(selected,(e.deltaY>0?1:-1)*Math.PI/36); } },{passive:false});
 
     /* End drag for blobs */
-    Events.on(mc,'enddrag',()=>{ if(heldBlob){ heldBlob.personality.fakeDead=false; Body.setInertia(heldBlob,heldBlob.mass); heldBlob=null; } });
+    Events.on(mc,'enddrag',()=>{
+      if(heldBlob){
+        const p=heldBlob.personality;
+        const releaseSpeed=Vector.magnitude(heldBlob.velocity);
+        p.fakeDead=false;
+        p.lastReleaseSpeed=releaseSpeed;
+        Body.setInertia(heldBlob,heldBlob.mass);
+        if(releaseSpeed>12){
+          // Keep full throw velocity; no artificial cap. High-speed chaos is part of the sandbox.
+          p.scared=true; p.agitation=140; p.trauma+=releaseSpeed*0.55; p.scaredUntil=Date.now()+9000; p.wasThrownAt=Date.now(); p.heldEmotion='scared';
+          spreadFear(heldBlob,9000);
+          if(!p.infected) triggerCursorFear(mouse.position, 9000, heldBlob);
+        }else if(p.temperament==='joyful' && !p.infected){
+          p.mood=Math.min(1,p.mood+0.08); p.heldEmotion='joyful';
+        }
+        heldBlob=null;
+        updateCanvasCursor();
+      }
+    });
+
+
+    function portalFrontNormal(portal){
+      return Vector.rotate({x:1,y:0},portal.angle);
+    }
+    function portalTangent(portal){
+      return Vector.rotate({x:0,y:1},portal.angle);
+    }
+    function teleportBlobThroughPortal(blob, fromPortal, toPortal){
+      if(!toPortal || blob.personality.dead) return false;
+      const inNormal=portalFrontNormal(fromPortal);
+      const outNormal=portalFrontNormal(toPortal);
+      const inTangent=portalTangent(fromPortal);
+      const outTangent=portalTangent(toPortal);
+      const approach=blob.velocity.x*inNormal.x + blob.velocity.y*inNormal.y;
+      const speed=Math.max(5.5,Vector.magnitude(blob.velocity));
+      const inwardSpeed=Math.max(4.5,-approach);
+      const tangentSpeed=blob.velocity.x*inTangent.x + blob.velocity.y*inTangent.y;
+      let exitVel={
+        x:outNormal.x*inwardSpeed + outTangent.x*tangentSpeed,
+        y:outNormal.y*inwardSpeed + outTangent.y*tangentSpeed
+      };
+      const desiredMag=Math.max(speed*1.09,6);
+      exitVel=Vector.mult(Vector.normalise(exitVel),desiredMag);
+      blob.personality.portalRideCount=(blob.personality.portalRideCount||0)+1;
+      const exitDistance=blob.circleRadius+34;
+      Body.setPosition(blob, Vector.add(toPortal.position, Vector.mult(outNormal,exitDistance)));
+      Body.setVelocity(blob,exitVel);
+      blob.personality.lastPosition={x:blob.position.x,y:blob.position.y};
+      blob.personality.portalSpin=Date.now()+700;
+      if((blob.personality.portalRideCount||0)>4 && desiredMag>30){
+        triggerPortalFear(toPortal.position,5000,blob);
+      }
+      blob.personality.portalTrips=(blob.personality.portalTrips||0)+1;
+      blob.personality.scared=true;
+      blob.personality.scaredUntil=Date.now()+1800;
+      blob.personality.agitation=Math.max(blob.personality.agitation,65);
+      for(let i=0;i<8;i++) particles.push({
+        x:toPortal.position.x+outNormal.x*18,
+        y:toPortal.position.y+outNormal.y*18,
+        vx:outNormal.x*rand(0.5,2)+rand(-0.6,0.6),
+        vy:outNormal.y*rand(0.5,2)+rand(-0.6,0.6),
+        r:rand(2,4),life:rand(300,700),start:Date.now(),kind:'portal'
+      });
+      return true;
+    }
+    function segmentPortalCrossing(blob, portal){
+      const prev=blob.personality.lastPosition || blob.position;
+      const cur=blob.position;
+      const normal=portalFrontNormal(portal);
+      const tangent=portalTangent(portal);
+
+      const a=Vector.sub(prev,portal.position);
+      const b=Vector.sub(cur,portal.position);
+      const ax=a.x*normal.x+a.y*normal.y; // + = front/marker side, - = back side
+      const ay=a.x*tangent.x+a.y*tangent.y;
+      const bx=b.x*normal.x+b.y*normal.y;
+      const by=b.x*tangent.x+b.y*tangent.y;
+
+      const dx=bx-ax, dy=by-ay;
+      const speed=Vector.magnitude(blob.velocity);
+      const approach=blob.velocity.x*normal.x+blob.velocity.y*normal.y;
+      const portalHalfHeight=70+blob.circleRadius*1.35;
+      const portalHalfWidth=26+blob.circleRadius*0.95+Math.min(50,speed*0.22);
+
+      // One-sided rule:
+      // The blob must start on the portal's front/marker side and move inward.
+      // This keeps back-side entry blocked, while the wider swept oval still
+      // catches very fast blobs that would otherwise tunnel through the sensor.
+      if(ax <= -blob.circleRadius*0.15 || approach >= 0.05) return null;
+
+      // 1) Plane crossing from front side through the portal opening.
+      if(ax!==bx && ax>=0 && bx<=portalHalfWidth){
+        const t=clamp((0-ax)/(bx-ax),0,1);
+        const yAt=ay+(by-ay)*t;
+        if(Math.abs(yAt)<=portalHalfHeight) return {hit:{x:prev.x+(cur.x-prev.x)*t,y:prev.y+(cur.y-prev.y)*t},along:Math.abs(yAt)};
+      }
+
+      // 2) High-speed safety net: closest point on the movement segment passes
+      // through the front-side portal oval. Still requires starting from front.
+      const len2=dx*dx+dy*dy;
+      const t=len2>0 ? clamp((-(ax)*dx + -(ay)*dy)/len2,0,1) : 0;
+      const cx=ax+dx*t, cy=ay+dy*t;
+      const ellipse=(cx*cx)/(portalHalfWidth*portalHalfWidth)+(cy*cy)/(portalHalfHeight*portalHalfHeight);
+      if(cx>=-blob.circleRadius*0.2 && ellipse<=1.0) return {hit:{x:prev.x+(cur.x-prev.x)*t,y:prev.y+(cur.y-prev.y)*t},along:Math.abs(cy)};
+
+      return null;
+    }
+    function handleSweptPortalTeleport(blob, now){
+      if(!portalA || !portalB || blob.personality.dead) return false;
+      // Fast blobs can tunnel through the sensor between frames.
+      // This swept segment check catches crossings of the portal plane.
+      for(const portal of [portalA, portalB]){
+        const crossing=segmentPortalCrossing(blob, portal);
+        if(!crossing) continue;
+        const target=portal===portalA?portalB:portalA;
+        return teleportBlobThroughPortal(blob, portal, target);
+      }
+      return false;
+    }
+
 
     /* Collision bookkeeping */
+    function tryContactInfection(a,b){
+      if(!a||!b||a.label!=='blob'||b.label!=='blob') return;
+      const pa=a.personality, pb=b.personality;
+      if(!pa||!pb) return;
+
+      // Strict rule: only a LIVE infected blob can infect, and only while the
+      // two circular bodies are actually overlapping/touching right now.
+      // This prevents dead infected blobs, stale collision pairs, or old
+      // contact memory from causing a "random" infection after death touch.
+      if(pa.dead || pb.dead) return;
+      const aIsCarrier = pa.infected === true && pa.infectious === true;
+      const bIsCarrier = pb.infected === true && pb.infectious === true;
+      if(aIsCarrier === bIsCarrier) return; // both healthy or both infected
+
+      const dx=a.position.x-b.position.x;
+      const dy=a.position.y-b.position.y;
+      const radii=(a.circleRadius||0)+(b.circleRadius||0);
+      if(radii<=0 || (dx*dx+dy*dy) > (radii*radii*1.08)) return;
+
+      const healthy = aIsCarrier ? b : a;
+      const source  = aIsCarrier ? a : b;
+      const hp=healthy.personality;
+      if(!hp || hp.dead || hp.infected) return;
+
+      hp.scared=true;
+      hp.scaredUntil=Date.now()+4000;
+      infectBlob(healthy, source);
+    }
+
     Events.on(engine,'collisionStart',ev=>{
       ev.pairs.forEach(({bodyA,bodyB})=>{
         const blob=[bodyA,bodyB].find(b=>b.label==='blob'); if(!blob) return;
-        const other=blob===bodyA?bodyB:bodyA; blob.personality.touching.add(other.id);
-        if((other===portalA||other===portalB)&&!inPortal.has(blob)){
+        const other=blob===bodyA?bodyB:bodyA;
+        blob.personality.touching.add(other.id);
+        if(other.label==='blob' && other.personality) other.personality.touching.add(blob.id);
+        tryContactInfection(bodyA,bodyB);
+        if((other===portalA||other===portalB)){
           const target= other===portalA?portalB:portalA; if(!target) return;
-          inPortal.add(blob);
-          Body.setPosition(blob, Vector.add(target.position, Vector.rotate({x:50,y:0},target.angle)));
-          Body.setVelocity(blob, Vector.rotate(blob.velocity,target.angle-other.angle));
-          setTimeout(()=>inPortal.delete(blob),50);
+          const normal=portalFrontNormal(other);
+          const rel=Vector.sub(blob.position,other.position);
+          const frontSide=rel.x*normal.x + rel.y*normal.y;
+          const approach=blob.velocity.x*normal.x + blob.velocity.y*normal.y;
+          // Front-side only: overlap from behind is ignored.
+          // The small negative allowance prevents edge jitter while still blocking true back entry.
+          if(frontSide < -blob.circleRadius*0.15 || approach > 0.35) return;
+          teleportBlobThroughPortal(blob, other, target);
         }
       });
     });
     Events.on(engine,'collisionEnd',ev=>{
       ev.pairs.forEach(({bodyA,bodyB})=>{
-        const blob=[bodyA,bodyB].find(b=>b.label==='blob'); if(blob){ const other=blob===bodyA?bodyB:bodyA; blob.personality.touching.delete(other.id);} });
+        const blob=[bodyA,bodyB].find(b=>b.label==='blob');
+        if(blob){
+          const other=blob===bodyA?bodyB:bodyA;
+          blob.personality.touching.delete(other.id);
+          if(other.label==='blob' && other.personality) other.personality.touching.delete(blob.id);
+        }
+      });
     });
+
+    Events.on(engine,'collisionActive',ev=>{
+      ev.pairs.forEach(({bodyA,bodyB})=>tryContactInfection(bodyA,bodyB));
+    });
+
+    Events.on(engine,'afterUpdate',()=>{
+      // Extra high-speed portal catch after physics has moved the blobs.
+      // This makes portal loops reliable even when a blob crosses the entire portal between frames.
+      for(const blob of blobs){
+        const p=blob.personality;
+        if(!p || p.dead) continue;
+        handleSweptPortalTeleport(blob, Date.now());
+      }
+    });
+
+    function handleVirus(blob, now){
+      const p=blob.personality;
+      if(!p.infected) return;
+      p.infection=clamp(p.infection+0.025+blob.circleRadius*0.00045,0,120);
+      const oldStage=p.infectionStage;
+      p.infectionStage = p.infection<30 ? 'exposed' : p.infection<65 ? 'sick' : p.infection<96 ? 'aggressive' : 'terminal';
+      if(oldStage!==p.infectionStage){
+        p.agitation=Math.max(p.agitation, p.infectionStage==='aggressive'?120:70);
+        for(let i=0;i<8;i++) addSickParticle(blob);
+      }
+      p.scared=true;
+      p.mood=0;
+      p.trauma += p.infectionStage==='terminal' ? 0.28 : 0.08;
+      p.agitation=Math.max(p.agitation, p.infectionStage==='aggressive'?90:45);
+      if(Math.random()<(p.infectionStage==='aggressive'?0.026:0.012)) addSickParticle(blob);
+      // Infection does not jump to other blobs here. Spreading is handled only by
+      // tryContactInfection() during collisionStart/collisionActive.
+      if(p.infection>=112 && !p.unkillableBlobzilla) markDead(blob,'virus');
+    }
+
+    function handleCrushing(blob){
+      const p=blob.personality;
+      let weight=0;
+      for(const other of blobs){
+        if(other===blob||other.personality.dead) continue;
+        const dx=Math.abs(other.position.x-blob.position.x);
+        const vertical=blob.position.y-other.position.y;
+        const overlapX=dx < (blob.circleRadius+other.circleRadius)*0.72;
+        const above=vertical > blob.circleRadius*0.15 && vertical < blob.circleRadius*6;
+        if(overlapX && above) weight += other.mass * (1+(blob.circleRadius/Math.max(6,other.circleRadius))*0.1);
+      }
+      const smallPenalty=clamp((24-blob.circleRadius)/18,0.15,1.6);
+      const threshold=blob.mass*(2.8+blob.circleRadius/16);
+      if(weight>threshold){
+        p.crushed += (weight-threshold)*0.035*smallPenalty;
+        p.trauma += (weight-threshold)*0.015*smallPenalty;
+        if(Math.random()<0.04*smallPenalty) Body.applyForce(blob,blob.position,{x:rand(-0.003,0.003),y:0.006});
+      }else{
+        p.crushed=Math.max(0,p.crushed-0.6);
+      }
+      if(p.crushed>100 && !p.unkillableBlobzilla) markDead(blob,'crushed');
+    }
+
+    function findNearestBlob(blob, predicate, maxDist=Infinity){
+      let best=null, bestD=maxDist;
+      for(const other of blobs){
+        if(other===blob || other.personality.dead || !predicate(other)) continue;
+        const d=Vector.magnitude(Vector.sub(other.position,blob.position));
+        if(d<bestD){ best=other; bestD=d; }
+      }
+      return best ? {blob:best,dist:bestD,dir:Vector.normalise(Vector.sub(best.position,blob.position))} : null;
+    }
+
+    function pointOnBeam(beam, position){
+      const len=beam.plugin?.w || Math.hypot(beam.vertices[1].x-beam.vertices[0].x,beam.vertices[1].y-beam.vertices[0].y);
+      const axis=Vector.rotate({x:1,y:0},beam.angle);
+      const normal=Vector.rotate({x:0,y:-1},beam.angle);
+      const rel=Vector.sub(position,beam.position);
+      const along=clamp(rel.x*axis.x+rel.y*axis.y,-len/2,len/2);
+      return Vector.add(beam.position,Vector.add(Vector.mult(axis,along),Vector.mult(normal,30)));
+    }
+
+    function allInterestingStructures(blob, now){
+      const p=blob.personality;
+      const options=[];
+      for(const beam of beams){
+        const target=pointOnBeam(beam,blob.position);
+        const d=Vector.magnitude(Vector.sub(target,blob.position));
+        if(d>760) continue;
+        const bias=p.interestBias==='beams'?0.72:p.interestBias==='wander'?1.12:1.0;
+        const score=d*bias/(0.75+p.curiosity*0.45);
+        options.push({kind:'beam',body:beam,target,dist:d,score});
+      }
+      for(const portal of [portalA,portalB].filter(Boolean)){
+        if(now < (p.portalAvoidUntil||0)) continue;
+        // Curiosity should pull blobs toward the actual portal opening, not the
+        // external rotate/arrow handle. The teleport check itself still enforces
+        // front-side entry, so the blob has to reach the oval centre naturally.
+        const target={x:portal.position.x,y:portal.position.y};
+        const d=Vector.magnitude(Vector.sub(target,blob.position));
+        if(d>820) continue;
+        const bias=p.interestBias==='portals'?0.76:p.interestBias==='wander'?1.22:1.05;
+        const portalCaution=1+(p.portalTrips||0)*0.32+p.fearfulness*0.10;
+        const score=d*bias*portalCaution/(0.72+p.curiosity*0.40);
+        options.push({kind:'portal',body:portal,target,dist:d,score});
+      }
+      return options.sort((a,b)=>a.score-b.score);
+    }
+
+    function chooseInterestingStructure(blob, now){
+      const p=blob.personality;
+      if(p.dead||p.infected||p.fakeDead) return null;
+      const frightened = p.scared && p.scaredUntil && now < p.scaredUntil;
+      if(frightened || p.agitation>85 || now < (p.exploreBoredUntil||0)) return null;
+
+      let options=allInterestingStructures(blob,now);
+      if(now < (p.portalTraumaUntil||0) || now < portalFearUntil){
+        options = options.filter(o=>o.kind!=='portal');
+      }
+      if(!options.length){ p.exploreTargetKind=null; p.exploreTargetId=null; return null; }
+
+      // Keep a chosen target for a while so they look intentional, then drift to another item.
+      let current=options.find(o=>o.kind===p.exploreTargetKind && o.body.id===p.exploreTargetId);
+      if(current && now < (p.exploreTargetUntil||0)) return current;
+
+      // Prefer not to choose the exact same item again unless it is the only thing around.
+      const fresh=options.filter(o=>!(o.kind===p.lastInterestingKind && o.body.id===p.exploreTargetId));
+      const pool=fresh.length?fresh:options;
+      const pickPool=pool.slice(0,Math.min(pool.length,3));
+      const chosen=pickPool[Math.floor(Math.random()*pickPool.length)];
+      p.exploreTargetKind=chosen.kind;
+      p.exploreTargetId=chosen.body.id;
+      p.exploreTargetUntil=now+rand(5000,11000);
+      p.lastInterestingKind=chosen.kind;
+      p.stuckTimer=0;
+      p.lastExploreX=blob.position.x;
+      return chosen;
+    }
+
+    function applyGroundedMovement(blob, directionX, hopForce, sideForce){
+      const p=blob.personality;
+      const r=blob.circleRadius;
+      const nearLeft=blob.position.x < r+24;
+      const nearRight=blob.position.x > canvas.width-r-24;
+      // Avoid wall-sticking: never keep pushing into the side walls.
+      if((nearLeft && directionX<0) || (nearRight && directionX>0)) directionX *= -0.45;
+      Body.applyForce(blob,blob.position,{x:directionX*sideForce,y:hopForce});
+    }
+
+    function handCuriosity(blob, now){
+      const p=blob.personality;
+      if(deleteToolActive || p.dead || p.infected || p.fakeDead || now > handActiveUntil) return null;
+      const toHand=Vector.sub(mouse.position,blob.position);
+      const distance=Vector.magnitude(toHand);
+      if(!distance) return null;
+
+      // The hand is very interesting, but only to nearby blobs.
+      // This prevents the whole colony from swarming across the canvas the
+      // moment the cursor enters. Clicking/holding the hand makes it a bit
+      // more noticeable, but still not globally attractive.
+      const baseNotice = Math.min(420, Math.max(300, canvas.width*0.28));
+      const heldBonus = pointerDown ? 140 : 0;
+      const highHandBonus = mouse.position.y < blob.position.y-blob.circleRadius*2 ? 55 : 0;
+      const noticeRadius = baseNotice + heldBonus + highHandBonus;
+      if(distance > noticeRadius) return null;
+
+      const strength = 1 - clamp(distance/noticeRadius,0,1);
+      return {
+        dist:distance,
+        dir:Vector.normalise(toHand),
+        verticalGap:blob.position.y-mouse.position.y,
+        strength
+      };
+    }
+
+
+    function setBlobLook(blob, target, kind='wander', priority=1, lockMs=320, now=Date.now()){
+      const p=blob.personality;
+      if(!p || !target || !Number.isFinite(target.x) || !Number.isFinite(target.y)) return;
+      if(now < (p.lookLockUntil||0) && priority < (p.lookPriority||0)) return;
+      const current=p.lookTarget;
+      const sameKind=p.lookTargetKind===kind;
+      const targetMoved=current ? Math.hypot(target.x-current.x,target.y-current.y) : Infinity;
+      // Avoid flickering at the edge of a target's range.
+      if(sameKind && current && targetMoved < blob.circleRadius*0.55){
+        p.lookLockUntil=Math.max(p.lookLockUntil||0, now+Math.min(lockMs,260));
+        return;
+      }
+      p.lookTarget={x:target.x,y:target.y};
+      p.lookTargetKind=kind;
+      p.lookPriority=priority;
+      p.lookLockUntil=now+lockMs;
+    }
+    function updateBlobLook(blob, now){
+      const p=blob.personality;
+      if(!p) return;
+      if(!p.lookTarget || now > (p.lookLockUntil||0)+900){
+        const fallback = Vector.magnitude(blob.velocity)>0.35
+          ? {x:blob.position.x+blob.velocity.x*14,y:blob.position.y+blob.velocity.y*6}
+          : {x:blob.position.x+Math.cos(p.wanderAngle||0)*70,y:blob.position.y-6};
+        setBlobLook(blob,fallback,Vector.magnitude(blob.velocity)>0.35?'movement':'wander',1,420,now);
+      }
+      const desired=p.lookTarget || {x:blob.position.x+Math.cos(p.wanderAngle||0)*70,y:blob.position.y-6};
+      let desiredDir=Vector.normalise(Vector.sub(desired,blob.position));
+      if(!Number.isFinite(desiredDir.x) || !Number.isFinite(desiredDir.y)) desiredDir={x:0,y:0};
+      const cur=p.lookSmooth || desiredDir;
+      const blend=0.16;
+      let next={x:cur.x+(desiredDir.x-cur.x)*blend,y:cur.y+(desiredDir.y-cur.y)*blend};
+      const mag=Math.hypot(next.x,next.y);
+      if(mag>0.001) next={x:next.x/mag,y:next.y/mag};
+      p.lookSmooth=next;
+      p.lookAt=desired;
+    }
+
+
+    function cursorThreat(blob, now){
+      const p=blob.personality;
+      if(p.dead || p.infected || p.fakeDead || now > cursorThreatUntil) return null;
+      const source = cursorThreatPos || mouse.position;
+      const toCursor=Vector.sub(source,blob.position);
+      const distance=Vector.magnitude(toCursor);
+      const threatRadius=Math.min(860, Math.max(520, canvas.width*0.52));
+      if(distance > threatRadius) return null;
+      const strength = 1 - clamp(distance/threatRadius,0,1);
+      return {
+        dist:distance,
+        dir:Vector.normalise(toCursor),
+        strength,
+        source
+      };
+    }
+
+    function portalThreat(blob, now){
+      const p=blob.personality;
+      if(p.dead || p.infected || p.fakeDead || now > portalFearUntil) return null;
+      const sources=[portalA,portalB].filter(Boolean);
+      if(portalFearPos) sources.push({position:portalFearPos});
+      let best=null, bestDist=Infinity;
+      for(const src of sources){
+        const source=src.position||src;
+        const d=Vector.magnitude(Vector.sub(source, blob.position));
+        if(d<bestDist){ best=source; bestDist=d; }
+      }
+      const radius=Math.min(760, Math.max(440, canvas.width*0.42));
+      if(!best || bestDist>radius) return null;
+      return {
+        source:best,
+        dist:bestDist,
+        dir:Vector.normalise(Vector.sub(best,blob.position)),
+        strength:1-clamp(bestDist/radius,0,1)
+      };
+    }
+
+    function livelyBehaviour(blob, now, touching, dist, dir){
+      const p=blob.personality;
+      const sizeFactor=Math.min(blob.circleRadius/40,3);
+      p.lookSleep = false;
+      const ageHeaviness=clamp(p.age/26000,0,0.35);
+      // Smaller/younger blobs are springier; older/bigger blobs become heavier and hop lower.
+      const agility=clamp(1.38-(blob.circleRadius/70)-ageHeaviness,0.58,1.35);
+      const jumpLimiter=p.infected?0.75:agility;
+
+      p.hunger=clamp(p.hunger+0.0008,0,1);
+      const naturalMood=p.temperament==='joyful'?0.0009:(p.temperament==='timid'?-0.0004:0.0002);
+      p.mood=clamp(p.mood+(touching?0.0008:-0.00025)+(p.scared?-0.003*p.fearfulness:naturalMood),0,1);
+
+      p.wanderTimer--;
+      if(p.wanderTimer<=0){
+        p.wanderAngle+=rand(-1.45,1.45);
+        p.wanderTimer=Math.floor(rand(55,190));
+      }
+
+      // Top priority: virus behavior. Zombies hunt, healthy blobs panic and flee.
+      const nearestHealthy=p.infected ? findNearestBlob(blob,o=>!o.personality.infected,Infinity) : null;
+      const nearestInfected=!p.infected ? findNearestBlob(blob,o=>o.personality.infected,560) : null;
+      const portalDanger=!nearestInfected ? portalThreat(blob, now) : null;
+      const cursorDanger=(!nearestInfected && !portalDanger) ? cursorThreat(blob, now) : null;
+      if(nearestInfected){
+        setBlobLook(blob,{x:nearestInfected.blob.position.x, y:nearestInfected.blob.position.y},'danger',5,560,now);
+        p.scared=true;
+        p.panicSource=nearestInfected.blob.id;
+        p.agitation=Math.max(p.agitation,100*p.fearfulness);
+        p.scaredUntil=now+3000;
+        p.mood=clamp(p.mood-0.025,0,1);
+        if(touching){
+          // Panic hop: mostly sideways with a capped jump, so it looks frantic without flying.
+          const panicHop=-0.0042*jumpLimiter*(1+0.35*p.fearfulness);
+          applyGroundedMovement(blob,-nearestInfected.dir.x,panicHop,0.0076*p.fearfulness);
+        }
+      }
+      if(nearestHealthy && touching){
+        setBlobLook(blob,{x:nearestHealthy.blob.position.x, y:nearestHealthy.blob.position.y},'prey',5,440,now);
+        p.scared=true;
+        p.agitation=Math.max(p.agitation,80);
+        p.scaredUntil=now+4000;
+        p.mood=0;
+        const chasePower = p.infectionStage==='aggressive' ? 0.0032 : p.infectionStage==='sick' ? 0.0020 : 0.0012;
+        const hop = p.infectionStage==='aggressive' ? -0.0007 : 0;
+        applyGroundedMovement(blob,nearestHealthy.dir.x,hop*jumpLimiter,chasePower);
+      }
+
+      if(portalDanger){
+        setBlobLook(blob,{x:portalDanger.source.x, y:portalDanger.source.y},'portal-danger',5,520);
+        p.scared=true;
+        p.panicSource='portal';
+        p.agitation=Math.max(p.agitation,82*p.fearfulness);
+        p.scaredUntil=Math.max(p.scaredUntil||0, now+2600);
+        p.mood=clamp(p.mood-0.012,0,1);
+        if(touching){
+          const panicHop=-0.0034*jumpLimiter*(0.75+0.28*p.fearfulness+0.22*portalDanger.strength);
+          const sideForce=0.0058*(0.72+0.5*portalDanger.strength)*p.fearfulness;
+          applyGroundedMovement(blob,-portalDanger.dir.x,panicHop,sideForce);
+        }
+      }
+
+      if(cursorDanger){
+        setBlobLook(blob,{x:cursorDanger.source.x, y:cursorDanger.source.y},'danger',5,460);
+        p.scared=true;
+        p.panicSource='cursor';
+        p.agitation=Math.max(p.agitation,92*p.fearfulness);
+        p.scaredUntil=Math.max(p.scaredUntil||0, now+2200);
+        p.mood=clamp(p.mood-0.018,0,1);
+        if(touching){
+          const panicHop=-0.0038*jumpLimiter*(0.92+0.32*p.fearfulness+0.28*cursorDanger.strength);
+          const sideForce=0.0069*(0.72+0.5*cursorDanger.strength)*p.fearfulness;
+          applyGroundedMovement(blob,-cursorDanger.dir.x,panicHop,sideForce);
+        }
+      }
+
+      const handTarget = (!nearestInfected && !portalDanger && !cursorDanger) ? handCuriosity(blob, now) : null;
+      if(handTarget){
+        setBlobLook(blob,{x:mouse.position.x, y:mouse.position.y},'hand',4,420,now);
+        // The hand is more interesting than beams/portals. It can interrupt
+        // wandering/resting, but movement still only happens while grounded.
+        p.restMode=null;
+        p.exploreTargetKind=null;
+        p.exploreTargetId=null;
+        p.exploreTargetUntil=0;
+        p.exploreBoredUntil=0;
+        const handStrength = handTarget.strength ?? 0.5;
+        p.mood=clamp(p.mood+0.0012*handStrength,0,1);
+        p.agitation=Math.max(p.agitation,12+18*handStrength);
+        if(touching){
+          const reachUp = handTarget.verticalGap > blob.circleRadius*1.2;
+          const reachIntensity = clamp(handTarget.verticalGap/360,0,1);
+          const jump = reachUp ? -(0.0038+0.0028*reachIntensity)*jumpLimiter*clamp(0.45+handStrength,0.45,1.2) : (Math.random()<0.012*handStrength ? -0.0024*jumpLimiter : 0);
+          const side = handTarget.dist < 70 ? 0.00065 : 0.0032*clamp(p.curiosity,0.65,1.55)*clamp(0.35+handStrength,0.35,1.0);
+          applyGroundedMovement(blob,handTarget.dir.x,jump,side);
+        }
+      }
+
+      // Older/larger blobs sometimes stop being curious, walk off to one side,
+      // and sleep for a moment. This breaks up the constant item ping-pong.
+      const matureEnough = p.age > 4800 + p.ageOffset || blob.circleRadius > 22;
+      const calmEnough = !handTarget && !p.infected && !nearestInfected && !p.fakeDead && !p.scared && p.agitation < 45;
+      if(!calmEnough){
+        p.restMode=null;
+      }else if(matureEnough && !p.restMode && now > (p.restCooldownUntil||0) && Math.random()<0.0018){
+        const goLeft = Math.random()<0.5;
+        p.restMode='walking';
+        p.restTargetX = goLeft ? rand(canvas.width*0.08, canvas.width*0.24) : rand(canvas.width*0.76, canvas.width*0.92);
+        p.restStartedAt=now;
+        p.exploreTargetKind=null; p.exploreTargetId=null; p.exploreTargetUntil=0;
+        p.exploreBoredUntil=now+3500;
+      }
+
+      let restingNow=false;
+      if(calmEnough && p.restMode==='walking'){
+        const dx=(p.restTargetX??blob.position.x)-blob.position.x;
+        setBlobLook(blob,{x:(p.restTargetX??blob.position.x), y:blob.position.y-6},'rest',2,720,now);
+        const dirToRest=Math.sign(dx)||Math.cos(p.wanderAngle)||1;
+        if(touching){
+          applyGroundedMovement(blob,dirToRest,Math.random()<0.018?-0.0028*jumpLimiter:0,0.00145);
+        }
+        if(Math.abs(dx)<42 || now-(p.restStartedAt||now)>9000){
+          p.restMode='sleeping';
+          p.restUntil=now+rand(4500,9500);
+          p.mood=clamp(p.mood+0.12,0,1);
+          Body.setVelocity(blob,{x:blob.velocity.x*0.25,y:blob.velocity.y});
+        }
+        restingNow=true;
+      }else if(calmEnough && p.restMode==='sleeping'){
+        if(now < (p.restUntil||0)){
+          restingNow=true;
+          p.lookSleep = true;
+          if(touching){
+            Body.setVelocity(blob,{x:blob.velocity.x*0.72,y:blob.velocity.y});
+          }
+        }else{
+          p.restMode=null;
+          p.restCooldownUntil=now+rand(12000,26000);
+          p.wanderAngle += rand(-2.2,2.2);
+        }
+      }
+
+      // Idle/exploration behavior. Curiosity only applies while grounded/touching,
+      // so blobs cannot steer or change direction in mid-air.
+      const curiousTarget = !handTarget && !portalDanger && !restingNow && !p.infected && !nearestInfected ? chooseInterestingStructure(blob, now) : null;
+      if(curiousTarget){
+        setBlobLook(blob,{x:curiousTarget.target.x, y:curiousTarget.target.y},curiousTarget.kind,3,700,now);
+        const toTarget=Vector.sub(curiousTarget.target,blob.position);
+        const targetDir=Vector.normalise(toTarget);
+        const isBeam=curiousTarget.kind==='beam';
+        const close=curiousTarget.dist < (isBeam?115:82);
+
+        // Detect when a blob has fixated/stalled near an item; after a bit it gets bored
+        // and will drift to a different item or wander before selecting again.
+        if(touching){
+          const moved=Math.abs(blob.position.x-(p.lastExploreX ?? blob.position.x));
+          p.stuckTimer = (moved<2.2 && close) ? (p.stuckTimer+1) : Math.max(0,p.stuckTimer-2);
+          p.lastExploreX=blob.position.x;
+          if(close || p.stuckTimer>115){
+            if(now > (p.exploreCooldownUntil||0)){
+              p.exploreTargetUntil=0;
+              p.exploreCooldownUntil=now+rand(1800,3600);
+              p.exploreBoredUntil=now+rand(700,1600);
+              p.wanderAngle += rand(-1.8,1.8);
+              p.stuckTimer=0;
+            }
+          }
+        }
+
+        if(touching){
+          // Beam = playground, portal = cautious curiosity. Both are grounded movement only.
+          const sideForce=(isBeam?0.0027:0.0018)*clamp(p.curiosity,0.55,1.45);
+          const hopForce=isBeam ? -0.0035*jumpLimiter : (close ? -0.0018*jumpLimiter : -0.0011*jumpLimiter);
+          applyGroundedMovement(blob,targetDir.x,hopForce,sideForce);
+
+          if(close && isBeam && Math.random()<0.016){
+            // Occasional playful hop, but never airborne steering.
+            applyGroundedMovement(blob,Math.cos(p.wanderAngle),-0.0048*jumpLimiter,0.0018);
+          }
+          if(close && !isBeam && Math.random()<0.012){
+            p.agitation=Math.max(p.agitation,22*p.fearfulness);
+            applyGroundedMovement(blob,targetDir.x,-0.0018*jumpLimiter,0.0011);
+          }
+        }
+      }else if(touching && !p.infected){
+        // No current item target: roam instead of sitting still. Some wander solo, some cluster.
+        const friend=blobs.find(o=>o!==blob&&!o.personality.dead&&!o.personality.infected&&Vector.magnitude(Vector.sub(o.position,blob.position))<180);
+        let roamX=Math.cos(p.wanderAngle);
+        if(friend && p.loneliness>0.48 && Math.random()<0.55){
+          roamX=Vector.normalise(Vector.sub(friend.position,blob.position)).x;
+        }
+        // If there are structures in the world, occasionally bias the wander angle toward a different one.
+        if((beams.length || portalA || portalB) && Math.random()<0.012){
+          const options=allInterestingStructures(blob,now);
+          if(options.length){
+            const pick=options[Math.floor(Math.random()*Math.min(options.length,3))];
+            roamX=Vector.normalise(Vector.sub(pick.target,blob.position)).x;
+          }
+        }
+        setBlobLook(blob,friend && p.loneliness>0.48 ? {x:friend.position.x, y:friend.position.y} : {x:blob.position.x + roamX*80, y:blob.position.y-8}, friend && p.loneliness>0.48 ? 'friend' : 'wander', 1, 650,now);
+        const hopChance=p.interestBias==='wander'?0.035:0.022;
+        if(Math.random()<hopChance/(1+sizeFactor*0.35)){
+          applyGroundedMovement(blob,roamX,-0.0045*jumpLimiter,0.0025*(0.75+p.curiosity*0.45));
+        }else if(Math.random()<0.075){
+          applyGroundedMovement(blob,roamX,0,0.0016*(0.75+p.curiosity*0.35));
+        }
+      }
+
+      // If a blob is trying to move through other blobs, let the small/young ones hop over the pile.
+      if(!restingNow && touching && !p.infected && Math.random()<0.030){
+        const forward={x:Math.cos(p.wanderAngle),y:0};
+        const blocked=blobs.some(o=>{
+          if(o===blob||o.personality.dead) return false;
+          const rel=Vector.sub(o.position,blob.position);
+          return Math.abs(rel.x)<blob.circleRadius*3.2 && rel.y>-blob.circleRadius*0.8 && rel.y<blob.circleRadius*2.2 && Math.sign(rel.x||forward.x)===Math.sign(forward.x);
+        });
+        if(blocked){ applyGroundedMovement(blob,forward.x,-0.0064*jumpLimiter,0.0026); }
+      }
+
+      // Cursor/hand attraction is handled only by handCuriosity(), which has a local notice radius.
+      // No fallback cursor pull here; far-away blobs should ignore the hand.
+
+      if(!p.lookTarget || now > (p.lookLockUntil||0)){
+        if(p.restMode==='sleeping') p.lookSleep = true;
+        else if(Vector.magnitude(blob.velocity)>0.35) setBlobLook(blob,{x:blob.position.x + blob.velocity.x*14, y:blob.position.y + blob.velocity.y*6},'movement',1,420,now);
+        else setBlobLook(blob,{x:blob.position.x + Math.cos(p.wanderAngle)*70, y:blob.position.y - 6},'wander',1,650,now);
+      }
+      updateBlobLook(blob, now);
+
+      // No vertical velocity cap for healthy blobs. Throws, falls, and portal loops
+      // should keep their real momentum. Zombie movement still gets a small horizontal cap below.
+      if(p.infected && blob.velocity.y < -8){ Body.setVelocity(blob,{x:blob.velocity.x,y:-8}); }
+
+      if(p.infected){
+        // Keep zombie movement slow horizontally only. Falling physics stays normal.
+        const maxZombieX = p.infectionStage==='aggressive' ? 1.62 : p.infectionStage==='sick' ? 1.28 : 0.98;
+        if(Math.abs(blob.velocity.x)>maxZombieX){
+          Body.setVelocity(blob,{x:Math.sign(blob.velocity.x)*maxZombieX,y:blob.velocity.y});
+        }
+      }else{
+        // No max velocity for healthy blobs: throws, falls, and portal loops are allowed to become dangerous.
+      }
+
+      // Extra anti-wall-stick guard: if they are pressing into a side wall, bleed horizontal speed.
+      if((blob.position.x<blob.circleRadius+12 && blob.velocity.x<0) ||
+         (blob.position.x>canvas.width-blob.circleRadius-12 && blob.velocity.x>0)){
+        Body.setVelocity(blob,{x:blob.velocity.x*0.35,y:blob.velocity.y});
+      }
+
+      if(now>p.nextBlink){ p.blinkUntil=now+rand(120,260); p.nextBlink=now+rand(1800,7000); }
+    }
+
+
+
+    function handleStructureStress(){
+      for(const beam of beams){
+        let load=0;
+        for(const b of blobs){
+          if(b.personality.dead) continue;
+          const dx=Math.abs(b.position.x-beam.position.x), dy=b.position.y-beam.position.y;
+          const span=Math.hypot(beam.vertices[1].x-beam.vertices[0].x,beam.vertices[1].y-beam.vertices[0].y)/2;
+          if(dx<span && dy<0 && Math.abs(dy)<90) load+=b.mass;
+        }
+        beam.plugin=beam.plugin||{};
+        const limit=spanLimit(beam);
+        beam.plugin.stress=clamp((beam.plugin.stress||0)+(load>limit?(load-limit)*0.002:-0.45),0,130);
+        beam.render.fillStyle=beam.plugin.stress>90?'#8c3f3f':beam.plugin.stress>55?'#8b7650':'#777';
+        if(beam.plugin.stress>125){
+          particles.push({x:beam.position.x,y:beam.position.y,vx:rand(-1,1),vy:rand(-2,-.5),r:5,life:800,start:Date.now(),kind:'crack'});
+          Composite.remove(world,beam); const idx=beams.indexOf(beam); if(idx>=0) beams.splice(idx,1); if(selected===beam) selected=null;
+        }
+      }
+    }
+    function spanLimit(beam){
+      const len=Math.hypot(beam.vertices[1].x-beam.vertices[0].x,beam.vertices[1].y-beam.vertices[0].y);
+      return Math.max(18,70-len*0.05);
+    }
 
     /* Game loop */
     Events.on(engine,'beforeUpdate',()=>{
       const now=Date.now();
+      const living=blobs.filter(b=>!b.personality.dead);
+      handleStructureStress();
+      // No auto re-seeding: after patient zero, infection spreads only by blob-to-blob collision.
       for(let i=blobs.length-1;i>=0;i--){
         const blob=blobs[i], p=blob.personality; if(p.dead) continue;
         p.age++;
+        handleSweptPortalTeleport(blob, now);
+        p.lastPosition={x:blob.position.x,y:blob.position.y};
+        handleVirus(blob,now);
+        if(p.dead) continue;
+        handleCrushing(blob);
+        if(p.dead) continue;
         if((blob.circleRadius<35||p.unkillableBlobzilla)&&p.age%120===0){ const s=p.unkillableBlobzilla?1+Math.min(0.0025,20/blob.circleRadius):1.01; Body.scale(blob,s,s); blob.circleRadius*=s; }
-        if(blob.circleRadius>=30&&p.age>7200+p.ageOffset&&!p.unkillableBlobzilla){
+        if(!p.sterile && blob.circleRadius>=30&&p.age>7200+p.ageOffset&&!p.unkillableBlobzilla){
           const parentR=blob.circleRadius,pos=blob.position,count=Math.random()<0.4?1:2;
-          for(let j=0;j<count;j++){ const r=Math.max(6,parentR*(0.25+Math.random()*0.15)); const baby=Bodies.circle(pos.x+(Math.random()-0.5)*20,pos.y-10,r,{restitution:0.2,frictionAir:0.005,label:'blob',render:{fillStyle:greenTint(r)}}); baby.circleRadius=r; baby.personality={age:0,ageOffset:Math.floor(Math.random()*600),scared:false,agitation:0,trauma:p.trauma*0.25,fakeDead:false,unkillableBlobzilla:Math.random()<0.01,touching:new Set()}; blobs.push(baby); Composite.add(world,baby); stats.split++; if(baby.personality.unkillableBlobzilla) stats.zilla++; }
-          markDead(blob); ghosts.push({x:blob.position.x,y:blob.position.y,start:now}); Composite.remove(world,blob); blobs.splice(i,1); continue;
+          for(let j=0;j<count;j++){
+            const r=Math.max(6,parentR*(0.25+Math.random()*0.15));
+            const baby=createBlob(pos.x+(Math.random()-0.5)*20,pos.y-10,r,{trauma:p.trauma*0.25,infected:p.infected,sterile:p.infected,infection:p.infected?18:0,infectionStage:p.infected?'exposed':'healthy'});
+            blobs.push(baby); Composite.add(world,baby); stats.split++; if(baby.personality.unkillableBlobzilla) stats.zilla++;
+          }
+          markDead(blob,'split'); ghosts.push({x:blob.position.x,y:blob.position.y,start:now}); Composite.remove(world,blob); blobs.splice(i,1); continue;
         }
-        if(blob.circleRadius>=120&&!p.unkillableBlobzilla){ markDead(blob); ghosts.push({x:blob.position.x,y:blob.position.y,start:now}); Composite.remove(world,blob); blobs.splice(i,1); continue; }
+        if(blob.circleRadius>=120&&!p.unkillableBlobzilla){ markDead(blob,'old'); ghosts.push({x:blob.position.x,y:blob.position.y,start:now}); Composite.remove(world,blob); blobs.splice(i,1); continue; }
         const speed=Vector.magnitude(blob.velocity);
-        if(speed>25){ p.agitation=100; p.scared=true; p.trauma+=speed*0.5; p.scaredUntil=now+5000; }
-        else{ p.agitation=Math.max(0,p.agitation-0.4); p.trauma=Math.max(0,p.trauma-0.6); if(p.agitation<10&&(!p.scaredUntil||now>p.scaredUntil)) p.scared=false; }
-        if(p.trauma>1000&&!p.unkillableBlobzilla) markDead(blob);
+        if(speed>18){ p.agitation=120; p.scared=true; p.trauma+=speed*0.18; p.scaredUntil=now+7000; }
+        // High speed is dangerous, but not instant death from a normal throw.
+        // Portal loops can build momentum over time until the blob finally dies.
+        if(speed>55){ p.trauma += (speed-55)*0.55; }
+        else{ p.agitation=Math.max(0,p.agitation-0.4); p.trauma=Math.max(0,p.trauma-(p.infected?0.08:0.6)); if(p.agitation<10&&(!p.scaredUntil||now>p.scaredUntil)) p.scared=false; }
+        const tooFast = speed>110 || (speed>80 && (p.portalRideCount||0)>2);
+        const overloaded = p.trauma>1500 && (speed>45 || (p.portalRideCount||0)>1);
+        if((tooFast || overloaded) && !p.unkillableBlobzilla){
+          const cause = 'velocity';
+          markDead(blob,cause);
+          triggerPortalFear(blob.position,15000,blob);
+        }
         const touching=p.touching.size>0;
         const toMouse=Vector.sub(mouse.position,blob.position); const dist=Vector.magnitude(toMouse); const dir=Vector.normalise(toMouse);
-        if(touching){ const sizeFactor=Math.min(blob.circleRadius/40,3); if(Math.random()<0.03/(1+sizeFactor)) Body.applyForce(blob,blob.position,{x:(Math.random()-0.5)*0.01,y:-0.015*(1+0.6*sizeFactor)}); if(dist<600&&Math.random()<0.05/(1+sizeFactor)){ const baseJump=-0.02*(1+0.8*sizeFactor), baseSpeed=0.02*(1+0.4*sizeFactor), flee=p.scared; Body.applyForce(blob,blob.position,{x:(flee?-dir.x:dir.x)*(flee?baseSpeed*2.5:baseSpeed),y:flee?baseJump*1.2:baseJump}); } }
-        const scale=Math.min(1+speed*0.15,2); blob.render.sprite=blob.render.sprite||{}; blob.render.sprite.xScale=scale; blob.render.sprite.yScale=1/scale; blob.render.fillStyle=p.dead?'#666':greenTint(blob.circleRadius);
+        livelyBehaviour(blob,now,touching,dist,dir);
+        const impactSquish=Math.min(speed*0.035+(p.fakeDead?0.22:0)+(touching?0.04:0),0.38); p.squish=p.squish*0.82+impactSquish*0.18; blob.render.fillStyle=p.dead?'#666':(p.infected?infectedTint(blob.circleRadius,p.infectionStage):greenTint(blob.circleRadius));
       }
-      for(let i=blobs.length-1;i>=0;i--){ const b=blobs[i]; if(b.personality.dead&&now-b.personality.deathTime>4000){ ghosts.push({x:b.position.x,y:b.position.y,start:now}); Composite.remove(world,b); blobs.splice(i,1);} }
+      for(let i=blobs.length-1;i>=0;i--){ const b=blobs[i]; if(b.personality.dead&&now-b.personality.deathTime>4000){ ghosts.push({x:b.position.x,y:b.position.y,start:now,cause:b.personality.deathCause}); Composite.remove(world,b); blobs.splice(i,1);} }
     });
 
     /* Glow around selected structure */
@@ -229,24 +1393,307 @@
       ctx.restore();
     });
 
-    /* Health aura */
+
+    /* Portal direction arrows + structure gizmos */
     Events.on(render,'afterRender',()=>{
-      const ctx=render.context, now=Date.now(); ctx.save(); blobs.forEach(b=>{ const p=b.personality; if(!p||p.dead||p.fakeDead) return; let col=[100,255,100]; const t=p.trauma||0; if(t>=800) col=[255,0,0]; else if(t>=500) col=[255,80,80]; else if(t>=300) col=[255,180,80]; else if(t>=100) col=[255,255,100]; const pulse=6+Math.sin((now+b.id)/150)*4; ctx.beginPath(); ctx.arc(b.position.x,b.position.y,b.circleRadius+pulse,0,Math.PI*2); ctx.lineWidth=4; ctx.strokeStyle=`rgba(${col[0]},${col[1]},${col[2]},0.35)`; ctx.stroke(); }); ctx.restore();
+      const ctx=render.context, now=Date.now(); ctx.save();
+      for(const p of [portalA,portalB].filter(Boolean)){
+        const normal=Vector.rotate({x:1,y:0},p.angle);
+        const pulse=(Math.sin(now/160)+1)/2;
+        const col=p===portalA?'80,170,255':'255,150,50';
+        ctx.save();
+        ctx.translate(p.position.x,p.position.y); ctx.rotate(p.angle);
+        ctx.lineWidth=4; ctx.shadowBlur=18; ctx.shadowColor=p===portalA?'#4aa3ff':'#ff9b37';
+        ctx.strokeStyle=`rgba(${col},${0.60+0.35*pulse})`;
+        // Visual portal is now only an oval ring; the invisible physics body remains for teleport detection.
+        ctx.beginPath(); ctx.ellipse(0,0,19,55,0,0,Math.PI*2); ctx.stroke();
+        ctx.lineWidth=1.5; ctx.strokeStyle=`rgba(${col},0.35)`;
+        ctx.beginPath(); ctx.ellipse(0,0,13,46,0,0,Math.PI*2); ctx.stroke();
+        ctx.restore();
+
+        // Outside marker: drag the portal body/centre to move, drag this marker to rotate/facing.
+        const out=portalRotateHandle(p);
+        ctx.save();
+        ctx.shadowBlur=14; ctx.shadowColor=p===portalA?'#4aa3ff':'#ff9b37';
+        ctx.strokeStyle=`rgba(${col},0.50)`; ctx.lineWidth=2;
+        ctx.beginPath(); ctx.moveTo(p.position.x+normal.x*48,p.position.y+normal.y*48); ctx.lineTo(out.x,out.y); ctx.stroke();
+        ctx.fillStyle=`rgba(${col},0.95)`;
+        ctx.beginPath(); ctx.arc(out.x,out.y,8,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle='rgba(255,255,255,.85)';
+        ctx.beginPath(); ctx.moveTo(out.x+normal.x*8,out.y+normal.y*8); ctx.lineTo(out.x-normal.y*5,out.y-normal.x*-5); ctx.lineTo(out.x+normal.y*5,out.y+normal.x*-5); ctx.closePath(); ctx.fill();
+        ctx.restore();
+      }
+      for(const beam of beams){
+        // Draw the actual beam ourselves so physics, fill and outline always match.
+        const bw=beam.plugin?.w || Math.hypot(beam.vertices[1].x-beam.vertices[0].x,beam.vertices[1].y-beam.vertices[0].y);
+        const bh=beam.plugin?.h || 20;
+        ctx.save();
+        ctx.translate(beam.position.x,beam.position.y); ctx.rotate(beam.angle);
+        ctx.fillStyle=beam.plugin?.stress>90?'rgba(140,63,63,.85)':beam.plugin?.stress>55?'rgba(139,118,80,.85)':'rgba(130,130,130,.82)';
+        ctx.strokeStyle='rgba(255,255,255,.95)'; ctx.lineWidth=3; ctx.shadowBlur=10; ctx.shadowColor='rgba(255,255,255,.35)';
+        ctx.beginPath(); ctx.rect(-bw/2,-bh/2,bw,bh); ctx.fill(); ctx.stroke();
+        ctx.restore();
+
+        // Only show beam handles/rotation marker while selected, dragged, or being placed.
+        const beamIsActive = selected===beam || dragging===beam || buildGhost===beam;
+        if(beamIsActive){
+          const ends=beamEndHandles(beam);
+          ctx.fillStyle='rgba(255,255,255,.75)'; ctx.strokeStyle='rgba(255,255,255,.35)'; ctx.lineWidth=1.5;
+          for(const e of ends){ ctx.beginPath(); ctx.arc(e.x,e.y,6,0,Math.PI*2); ctx.fill(); ctx.stroke(); }
+          const h=beamRotateHandle(beam), n=Vector.rotate({x:0,y:-1},beam.angle);
+          ctx.strokeStyle='rgba(255,255,255,.35)'; ctx.beginPath(); ctx.moveTo(beam.position.x+n.x*28,beam.position.y+n.y*28); ctx.lineTo(h.x,h.y); ctx.stroke();
+          ctx.fillStyle='rgba(255,255,255,.9)'; ctx.beginPath(); ctx.arc(h.x,h.y,8,0,Math.PI*2); ctx.fill(); ctx.stroke();
+        }
+        if(beam.plugin?.stress>45){
+          ctx.strokeStyle=beam.plugin.stress>90?'rgba(255,90,70,.9)':'rgba(255,190,90,.75)';
+          ctx.beginPath(); ctx.moveTo(beam.position.x-12,beam.position.y-5); ctx.lineTo(beam.position.x+2,beam.position.y+7); ctx.lineTo(beam.position.x+16,beam.position.y-4); ctx.stroke();
+        }
+      }
+      if(selected&&(selected.label==='beam'||selected.label==='portalA'||selected.label==='portalB')){
+        const pos=selected.position;
+        ctx.strokeStyle='rgba(255,255,255,.45)'; ctx.lineWidth=1.5; ctx.setLineDash([6,6]);
+        ctx.beginPath(); ctx.arc(pos.x,pos.y,selected.label==='beam'?46:64,0,Math.PI*2); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle='rgba(255,255,255,.85)';
+        ctx.beginPath(); ctx.arc(pos.x,pos.y,5,0,Math.PI*2); ctx.fill();
+      }
+      ctx.restore();
     });
 
+
+    /* Squishy soft body overlay */
+    Events.on(render,'afterRender',()=>{
+      const ctx=render.context, now=Date.now(); ctx.save();
+      blobs.forEach(b=>{
+        const p=b.personality; if(!p||p.dead) return;
+        const r=b.circleRadius;
+        const speed=Vector.magnitude(b.velocity);
+        const angle=Math.atan2(b.velocity.y,b.velocity.x);
+        const stage=p.infected?p.infectionStage:'healthy';
+        const fill=p.infected?infectedTint(r,stage):greenTint(r);
+        const squash=clamp((p.squish||0)+(p.crushed||0)/420,0,0.42);
+        const stretch=clamp(speed*0.018,0,0.22);
+        const sx=1+stretch+squash*0.35;
+        const sy=1-squash*0.55;
+        ctx.save();
+        ctx.translate(b.position.x,b.position.y);
+        ctx.rotate(speed>0.8?angle:0);
+        ctx.globalAlpha=0.96;
+        ctx.shadowColor=p.infected?'rgba(255,60,70,.55)':'rgba(110,255,140,.28)';
+        ctx.shadowBlur=p.infected?10:5;
+        ctx.fillStyle=fill;
+        ctx.beginPath();
+        ctx.ellipse(0,0,r*sx,r*sy,0,0,Math.PI*2);
+        ctx.fill();
+        if(p.infected){
+          // Keep infected body texture as small sick spots/cracks only,
+          // away from the face area.
+          ctx.globalAlpha=0.42;
+          ctx.fillStyle=stage==='terminal'?'rgba(45,0,8,.75)':stage==='aggressive'?'rgba(80,5,12,.62)':'rgba(90,35,0,.45)';
+          for(let i=0;i<5;i++){
+            const a=(i*2.17+b.id*0.31+Math.sin(now/900+i)*0.08);
+            const px=Math.cos(a)*r*(0.28+0.18*((i+b.id)%3));
+            const py=Math.sin(a)*r*(0.18+0.16*((i+2*b.id)%3));
+            if(py>-r*0.05 && Math.abs(px)<r*0.55) continue; // avoid lower-face zone
+            ctx.beginPath();
+            ctx.ellipse(px,py,Math.max(1.2,r*0.055),Math.max(0.8,r*0.032),a,0,Math.PI*2);
+            ctx.fill();
+          }
+        }
+        ctx.restore();
+      });
+      ctx.restore();
+    });
+
+    /* Health aura */
+    function infectionAuraColor(p){
+      const severity = clamp((p.infection||0)/112,0,1);
+      if(severity < 0.25) return [255,190,70];      // newly infected: amber
+      if(severity < 0.58) return [255,115,55];      // sick: orange-red
+      if(severity < 0.86) return [255,45,45];       // aggressive: red
+      return [150,0,18];                            // terminal: dark red
+    }
+    Events.on(render,'afterRender',()=>{
+      const ctx=render.context, now=Date.now(); ctx.save();
+      blobs.forEach(b=>{
+        const p=b.personality; if(!p||p.dead||p.fakeDead) return;
+        let col;
+        if(p.infected){
+          col=infectionAuraColor(p);
+        }else{
+          col=[100,255,100];
+          const t=p.trauma||0;
+          if(t>=800) col=[255,0,0];
+          else if(t>=500) col=[255,80,80];
+          else if(t>=300) col=[255,180,80];
+          else if(t>=100) col=[255,255,100];
+        }
+        const r=b.circleRadius;
+        const squish=p.squish||0;
+        const speed=Vector.magnitude(b.velocity||{x:0,y:0});
+        const stretch=clamp(1+speed*0.035+squish*0.65,0.78,1.42);
+        const pulse=5+Math.sin((now+b.id)/150)*3;
+        const alpha=p.infected ? 0.50 : 0.35;
+        const rot=Math.atan2(b.velocity.y||0,b.velocity.x||0);
+        ctx.save();
+        ctx.translate(b.position.x,b.position.y);
+        ctx.rotate(rot);
+        ctx.beginPath();
+        ctx.ellipse(0,0,(r+pulse)*stretch,(r+pulse)/stretch,0,0,Math.PI*2);
+        ctx.lineWidth=p.infected?4.8:4;
+        ctx.strokeStyle=`rgba(${col[0]},${col[1]},${col[2]},${alpha})`;
+        ctx.shadowColor=`rgba(${col[0]},${col[1]},${col[2]},${p.infected?0.35:0.18})`;
+        ctx.shadowBlur=p.infected?12:7;
+        ctx.stroke();
+        ctx.restore();
+      });
+      ctx.restore();
+    });
+
+
+
+    /* Little eyes + emotions */
+    Events.on(render,'afterRender',()=>{
+      const ctx=render.context, now=Date.now(); ctx.save();
+      blobs.forEach(b=>{
+        const p=b.personality; if(!p||p.dead) return;
+        const r=b.circleRadius, blink=(now<p.blinkUntil)||p.fakeDead||p.lookSleep===true||p.restMode==='sleeping';
+        const eyeY=b.position.y-r*0.22, eyeDx=r*0.35;
+        let look=p.lookSmooth || {x:0,y:0};
+        if(!Number.isFinite(look.x) || !Number.isFinite(look.y)) look={x:0,y:0};
+        ctx.fillStyle=p.infected?(p.infectionStage==='terminal'?'#ffdede':'#fff2f2'):'#071407';
+        if(p.infected){
+          // Zombie face: angry eyes only. No mouth is drawn in any infected state.
+          ctx.strokeStyle=ctx.fillStyle;
+          ctx.lineWidth=Math.max(2,r*0.105);
+          ctx.lineCap='round';
+          const exL=b.position.x-eyeDx, exR=b.position.x+eyeDx;
+          const sl=r*0.18;
+          ctx.beginPath(); ctx.moveTo(exL-sl,eyeY-r*0.08); ctx.lineTo(exL+sl,eyeY+r*0.08); ctx.stroke(); // \ eye
+          ctx.beginPath(); ctx.moveTo(exR-sl,eyeY+r*0.08); ctx.lineTo(exR+sl,eyeY-r*0.08); ctx.stroke(); // / eye
+          return;
+        }
+        if(blink){
+          ctx.lineWidth=Math.max(1.5,r*0.08); ctx.strokeStyle=ctx.fillStyle;
+          ctx.beginPath(); ctx.moveTo(b.position.x-eyeDx-r*0.12,eyeY); ctx.lineTo(b.position.x-eyeDx+r*0.12,eyeY); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(b.position.x+eyeDx-r*0.12,eyeY); ctx.lineTo(b.position.x+eyeDx+r*0.12,eyeY); ctx.stroke();
+        }else{
+          for(const side of [-1,1]){
+            ctx.beginPath(); ctx.arc(b.position.x+side*eyeDx+look.x*r*0.08,eyeY+look.y*r*0.08,Math.max(1.8,r*0.12),0,Math.PI*2); ctx.fill();
+          }
+        }
+        // Eyes only. Emotion is expressed through eye shape, movement, aura and body motion.
+      });
+      ctx.restore();
+    });
+
+    /* Corpse X-eyes. */
+    Events.on(render,'afterRender',()=>{
+      const ctx=render.context; ctx.save();
+      blobs.forEach(b=>{
+        const p=b.personality; if(!p||!p.dead) return;
+        const r=b.circleRadius;
+        ctx.save();
+        ctx.translate(b.position.x,b.position.y);
+        ctx.rotate(b.angle||0);
+        ctx.lineCap='round';
+        ctx.strokeStyle='rgba(20,20,20,0.92)';
+        ctx.lineWidth=Math.max(2,r*0.13);
+        const eyeY=-r*0.22, eyeDx=r*0.34, sEye=r*0.17;
+        for(const side of [-1,1]){
+          const x=side*eyeDx;
+          ctx.beginPath(); ctx.moveTo(x-sEye,eyeY-sEye); ctx.lineTo(x+sEye,eyeY+sEye); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(x+sEye,eyeY-sEye); ctx.lineTo(x-sEye,eyeY+sEye); ctx.stroke();
+        }
+        ctx.restore();
+      });
+      ctx.restore();
+    });
+
+    /* Particles */
+    Events.on(render,'afterRender',()=>{
+      const ctx=render.context, now=Date.now();
+      for(let i=particles.length-1;i>=0;i--){
+        const p=particles[i]; const t=(now-p.start)/p.life;
+        if(t>=1){ particles.splice(i,1); continue; }
+        p.x+=p.vx; p.y+=p.vy;
+        ctx.save(); ctx.globalAlpha=1-t; ctx.fillStyle=p.kind==='sick'?'#ff4455':p.kind==='portal'?'#9fd7ff':p.kind==='crack'?'#ffaa66':'#fff';
+        ctx.beginPath(); ctx.arc(p.x,p.y,p.r*(1-t),0,Math.PI*2); ctx.fill(); ctx.restore();
+      }
+    });
     /* Ghosts */
     Events.on(render,'afterRender',()=>{
       const ctx=render.context, now=Date.now(); for(let i=ghosts.length-1;i>=0;i--){ const g=ghosts[i]; const t=(now-g.start)/2000; if(t>=1){ ghosts.splice(i,1); continue;} ctx.save(); ctx.globalAlpha=1-t; ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(g.x,g.y-50*t,10,0,Math.PI*2); ctx.fill(); ctx.restore(); }
     });
+
+    /* Final infected face pass: repaint lower face/body texture and redraw angry eyes only. */
+    Events.on(render,'afterRender',()=>{
+      const ctx=render.context, now=Date.now();
+      ctx.save();
+      blobs.forEach(b=>{
+        const p=b.personality;
+        if(!p||p.dead||!p.infected) return;
+        const r=b.circleRadius;
+        const stage=p.infectionStage||'sick';
+        const speed=Vector.magnitude(b.velocity);
+        const squash=clamp((p.squish||0)+(p.crushed||0)/420,0,0.42);
+        const stretch=clamp(speed*0.018,0,0.22);
+        const sx=1+stretch+squash*0.35;
+        const sy=1-squash*0.55;
+        const angle=speed>0.8?Math.atan2(b.velocity.y,b.velocity.x):0;
+
+        ctx.save();
+        ctx.translate(b.position.x,b.position.y);
+        ctx.rotate(angle);
+        ctx.globalAlpha=0.985;
+        ctx.fillStyle=infectedTint(r,stage);
+        // Clean lower-face zone so infected blobs remain eyes-only.
+        ctx.beginPath();
+        ctx.ellipse(0,r*0.23,r*0.64*sx,r*0.36*sy,0,0,Math.PI*2);
+        ctx.fill();
+
+        // Repaint a little body texture only outside the face zone.
+        ctx.globalAlpha=0.18;
+        ctx.fillStyle=stage==='terminal'?'rgba(30,0,6,.65)':'rgba(70,0,8,.42)';
+        for(let i=0;i<3;i++){
+          const a=i*2.4+b.id*0.23+Math.sin(now/1200+i)*0.05;
+          const px=Math.cos(a)*r*0.44;
+          const py=-r*(0.22+0.07*i);
+          ctx.beginPath();
+          ctx.ellipse(px,py,Math.max(1,r*0.045),Math.max(0.8,r*0.026),a,0,Math.PI*2);
+          ctx.fill();
+        }
+        ctx.restore();
+
+        // Angry zombie eyes only.
+        const eyeY=b.position.y-r*0.22, eyeDx=r*0.35;
+        const exL=b.position.x-eyeDx, exR=b.position.x+eyeDx, sl=r*0.18;
+        ctx.strokeStyle=stage==='terminal'?'#ffdede':'#fff2f2';
+        ctx.lineWidth=Math.max(2,r*0.105);
+        ctx.lineCap='round';
+        ctx.beginPath(); ctx.moveTo(exL-sl,eyeY-r*0.08); ctx.lineTo(exL+sl,eyeY+r*0.08); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(exR-sl,eyeY+r*0.08); ctx.lineTo(exR+sl,eyeY-r*0.08); ctx.stroke();
+      });
+      ctx.restore();
+    });
+
 
     /* Responsive */
     addEventListener('resize',()=>{ canvas.width=innerWidth; canvas.height=innerHeight; render.canvas.width=canvas.width; render.canvas.height=canvas.height; });
 
     /* HUD init */
     updateHUD();
+    setPortalGunActive(false);
+    const __spawnInit=document.getElementById('spawnBlobBtn'); setIconButton(__spawnInit,'🟢');
+    const __deathInit=document.getElementById('deathToggle'); setIconButton(__deathInit,'☠️');
+    const __virusInit=document.getElementById('virusBtn'); setIconButton(__virusInit,'☣️');
+    const __speedDownInit=document.getElementById('speedDownBtn'); setIconButton(__speedDownInit,'−');
+    const __speedUpInit=document.getElementById('speedUpBtn'); setIconButton(__speedUpInit,'+');
+    const __devInit=document.getElementById('devBtn'); setIconButton(__devInit,'⚙️');
+    const __beamInit=document.getElementById('beamTool'); if(__beamInit){ setIconButton(__beamInit,'▭'); __beamInit.classList.remove('active'); __beamInit.style.color='grey'; }
+    const __deleteInit=document.getElementById('deleteTool'); if(__deleteInit){ setIconButton(__deleteInit,'✕'); __deleteInit.classList.remove('active','delete-active'); __deleteInit.style.color='grey'; }
 
     /* Keyboard rotate */
-    addEventListener('keydown',e=>{ if(!selected) return; if(e.key==='q'||e.key==='Q') rotateSelected('left'); if(e.key==='e'||e.key==='E') rotateSelected('right'); });
+    addEventListener('keydown',e=>{ if(!selected) return; if(e.key==='q'||e.key==='Q') rotateSelected('left'); if(e.key==='e'||e.key==='E') rotateSelected('right'); if(e.key==='Delete'||e.key==='Backspace'){ if(selected.label==='beam'){ const i=beams.indexOf(selected); if(i>=0) beams.splice(i,1); Composite.remove(world,selected); selected=null; } } });
   </script>
 </body>
 </html>
